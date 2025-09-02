@@ -52,8 +52,8 @@ const VALID_TRANSITIONS = {
   [CueState.ACTIVE]: [CueState.COMPLETING, CueState.BACKGROUND, CueState.TERMINATED, CueState.STALE],
   [CueState.COMPLETING]: [CueState.FINISHED, CueState.BACKGROUND, CueState.TERMINATED, CueState.STALE], // Allow COMPLETING -> STALE
   [CueState.BACKGROUND]: [CueState.FINISHED, CueState.TERMINATED, CueState.STALE],
-  [CueState.FINISHED]: [], // Terminal state
-  [CueState.TERMINATED]: [], // Terminal state
+  [CueState.FINISHED]: [CueState.ACTIVE], // Can be reactivated by FIRE events
+  [CueState.TERMINATED]: [], // Terminal state - gets cleaned up directly
   [CueState.STALE]: [CueState.ACTIVE, CueState.ERROR, CueState.FINISHED], // Can recover from stale or be cleaned up
   [CueState.ERROR]: [CueState.DISCOVERED, CueState.STALE] // Can recover from error
 };
@@ -187,9 +187,25 @@ class CueTracker {
   cleanupFinishedCue(cueId) {
     const cue = this.cues.get(cueId);
     if (cue && (cue.state === CueState.FINISHED || cue.state === CueState.TERMINATED)) {
-      // Save as last header cue if it's recent enough
-      if (!this.lastHeaderCue || cue.lastUpdate > this.lastHeaderCue.lastUpdate) {
+      // Save as last header cue if it's recent enough OR if it was fired more recently
+      const wasRecentlyFired = cue.raw && (cue.raw.startsWith('FIRE:') || cue.raw.startsWith('FIRE-COMPLETED:'));
+      const isMostRecentFire = this.lastFiredCue && this.lastFiredCue.cueId === cueId;
+      const wasFromPrevious = cue.source === 'previous';
+      
+      // Only update header cue if:
+      // - It was fired (not just from PREVIOUS messages)
+      // - Or it was more recently updated than current header and actually ran (had ACTIVE state)
+      const hadActiveState = cue.progressHistory && cue.progressHistory.length > 0;
+      
+      if (!wasFromPrevious && (!this.lastHeaderCue || 
+          cue.lastUpdate > this.lastHeaderCue.lastUpdate ||
+          wasRecentlyFired || 
+          isMostRecentFire ||
+          hadActiveState)) {
         this.lastHeaderCue = { ...cue };
+        logCueEvent('STATE', `Updated header cue to ${cueId}`, cueId);
+      } else if (wasFromPrevious) {
+        logCueEvent('STATE', `Skipped header update - cue was from PREVIOUS only`, cueId);
       }
       
       // Remove from active tracking
@@ -209,8 +225,11 @@ class CueTracker {
     const EXTENDED_STALE_TIMEOUT = this.STALE_TIMEOUT * 3; // 6 seconds for final cleanup
     
     for (const [cueId, cue] of this.cues) {
-      // Check for stale cues
-      if (now - cue.lastUpdate > this.STALE_TIMEOUT && cue.state !== CueState.STALE) {
+      // Check for stale cues (skip terminal states)
+      if (now - cue.lastUpdate > this.STALE_TIMEOUT && 
+          cue.state !== CueState.STALE && 
+          cue.state !== CueState.FINISHED && 
+          cue.state !== CueState.TERMINATED) {
         this.transitionCueState(cueId, CueState.STALE, 'No updates received');
       }
       
@@ -226,6 +245,13 @@ class CueTracker {
       if (cue.state === CueState.COMPLETING && now - cue.lastUpdate > this.STALE_TIMEOUT) {
         logCueEvent('CLEANUP', `Auto-finishing stuck completing cue`, cueId);
         this.transitionCueState(cueId, CueState.FINISHED, 'Auto-finish stuck completing cue');
+        this.cleanupFinishedCue(cueId);
+        continue;
+      }
+      
+      // Clean up old terminated cues  
+      if (cue.state === CueState.TERMINATED && now - cue.lastUpdate > EXTENDED_STALE_TIMEOUT) {
+        logCueEvent('CLEANUP', `Removing old terminated cue`, cueId);
         this.cleanupFinishedCue(cueId);
         continue;
       }
@@ -432,8 +458,8 @@ function parseActiveCue(fullCueText) {
   const time = timeMatch[1];
   const withoutTime = withoutPercentage.slice(0, -timeMatch[0].length);
   
-  // Extract cue list and number from the beginning
-  const cueMatch = withoutTime.match(/^(\d+)\/(\d+)\s+(.+)$/);
+  // Extract cue list and number from the beginning (support decimal cue numbers)
+  const cueMatch = withoutTime.match(/^(\d+)\/(\d+(?:\.\d+)?)\s+(.+)$/);
   if (!cueMatch) {
     return null; // Invalid cue format
   }
@@ -473,8 +499,8 @@ function parsePreviousCue(fullCueText) {
   const time = timeMatch[1];
   const withoutTime = fullCueText.slice(0, -timeMatch[0].length);
   
-  // Extract cue list and number from the beginning
-  const cueMatch = withoutTime.match(/^(\d+)\/(\d+)\s+(.+)$/);
+  // Extract cue list and number from the beginning (support decimal cue numbers)
+  const cueMatch = withoutTime.match(/^(\d+)\/(\d+(?:\.\d+)?)\s+(.+)$/);
   if (!cueMatch) {
     return null; // Invalid cue format
   }
@@ -565,6 +591,16 @@ function validateCueData(cueData, source) {
 
 // --- Bridge Logic ---
 udpPort.on("message", (oscMsg) => {
+  // Log raw OSC messages that contain cue/active/previous for debugging
+  if (oscMsg && oscMsg.address && (
+      oscMsg.address.toLowerCase().includes('cue') || 
+      oscMsg.address.toLowerCase().includes('active') || 
+      oscMsg.address.toLowerCase().includes('previous')
+  )) {
+    const args = oscMsg.args ? oscMsg.args.map(arg => arg.value).join(', ') : 'no args';
+    logCueEvent('OSC-RAW', `${oscMsg.address} -> [${args}]`);
+  }
+  
   // Validate OSC message structure
   const validation = validateOSCMessage(oscMsg);
   if (!validation.valid) {
@@ -591,8 +627,14 @@ udpPort.on("message", (oscMsg) => {
     if (pathParts.length >= 7) {
       const cueList = pathParts[5];
       const cueNumber = pathParts[6];
-      const cueId = `${cueList}/${cueNumber}`;
       
+      // Only process events from cue list 1
+      if (cueList !== '1') {
+        logCueEvent('OSC-FILTERED', `Ignoring FIRE event from cue list ${cueList}`, `${cueList}/${cueNumber}`);
+        return;
+      }
+      
+      const cueId = `${cueList}/${cueNumber}`;
       logCueEvent('OSC-IN', `FIRE event`, cueId);
       
       // Update state machine with fire event
@@ -615,6 +657,67 @@ udpPort.on("message", (oscMsg) => {
           cueTracker.transitionCueState(otherCueId, CueState.TERMINATED, `Interrupted by fire of ${cueId}`);
         }
       }
+      
+      // Handle the fired cue - create or reactivate it
+      const existingCue = cueTracker.cues.get(cueId);
+      if (existingCue) {
+        // Reactivate existing cue if it was stale or finished
+        if (existingCue.state === CueState.STALE || existingCue.state === CueState.FINISHED) {
+          cueTracker.transitionCueState(cueId, CueState.ACTIVE, 'Reactivated by FIRE event');
+          logCueEvent('FIRE', `Reactivated existing cue`, cueId);
+        } else {
+          // Update timestamp for existing active cue
+          existingCue.lastUpdate = fireTimestamp;
+          logCueEvent('FIRE', `Updated timestamp for active cue`, cueId);
+        }
+      } else {
+        // Create new cue with minimal data from FIRE event
+        // Extract label from FIRE event args if available
+        const fireLabel = oscMsg.args && oscMsg.args[0] && oscMsg.args[0].value ? oscMsg.args[0].value : '';
+        const fireCueData = {
+          cueList: cueList,
+          cueNumber: cueNumber,
+          label: fireLabel || `Cue ${cueNumber}`, // Use label from FIRE event or fallback
+          time: null, // Will be updated when ACTIVE message arrives
+          percentage: '0%', // Start with 0% until we know more
+          raw: `FIRE:${cueId}`,
+          timestamp: fireTimestamp
+        };
+        
+        const newCue = cueTracker.updateCue(cueId, fireCueData, 'fire');
+        // Immediately transition to ACTIVE since it was fired
+        if (newCue.state === CueState.DISCOVERED) {
+          cueTracker.transitionCueState(cueId, CueState.ACTIVE, 'Activated by FIRE event');
+        }
+        logCueEvent('FIRE', `Created new cue from FIRE event`, cueId);
+        
+        // Check if we get ACTIVE message within 1 second, if not treat as instant/completed cue
+        setTimeout(() => {
+          const cue = cueTracker.cues.get(cueId);
+          if (cue && cue.raw && cue.raw.startsWith('FIRE:') && !cue.fireExecuted) {
+            logCueEvent('FIRE', `No ACTIVE message received - treating as instant/completed cue`, cueId);
+            // Update to show as completed cue (like instant cues)
+            cue.percentage = '100%';
+            cue.time = 0;
+            // Keep the original label from FIRE event
+            cue.raw = `FIRE-COMPLETED:${cueId}`;
+            cueTracker.transitionCueState(cueId, CueState.COMPLETING, 'FIRE event without ACTIVE - completed');
+            
+            // Auto-finish after brief delay (like other completing cues)
+            setTimeout(() => {
+              if (cueTracker.cues.has(cueId) && cueTracker.cues.get(cueId).state === CueState.COMPLETING) {
+                cueTracker.transitionCueState(cueId, CueState.FINISHED, 'Instant cue completion');
+                cueTracker.cleanupFinishedCue(cueId);
+              }
+            }, 500);
+            
+            broadcastActiveCues();
+          }
+        }, 1000); // Wait 1 second to see if ACTIVE message follows
+      }
+      
+      // Always broadcast FIRE events immediately - they represent actual cue execution
+      broadcastActiveCues();
     }
   }
   
@@ -625,6 +728,12 @@ udpPort.on("message", (oscMsg) => {
     const parseResult = parseActiveCue(fullCueText);
     
     if (parseResult) {
+      // Only process cues from cue list 1
+      if (parseResult.cueList !== '1') {
+        logCueEvent('OSC-FILTERED', `Ignoring ACTIVE cue from cue list ${parseResult.cueList}`, `${parseResult.cueList}/${parseResult.cueNumber}`, fullCueText);
+        return;
+      }
+      
       const cueId = `${parseResult.cueList}/${parseResult.cueNumber}`;
       
       // Validate parsed cue data
@@ -644,12 +753,26 @@ udpPort.on("message", (oscMsg) => {
         return;
       }
       
-      cueTracker.updateCue(cueId, cueData, 'active');
+      const updatedCue = cueTracker.updateCue(cueId, cueData, 'active');
+      
+      // Check if this was a cue created from FIRE event that now has full details
+      const wasFireCreated = updatedCue.raw && updatedCue.raw.startsWith('FIRE:');
+      if (wasFireCreated) {
+        logCueEvent('ACTIVE', `Fire-created cue now has full details - this was actual execution`, cueId, fullCueText);
+        // Update the raw data to reflect it now has full active details
+        updatedCue.raw = fullCueText;
+        // Mark that this FIRE event was followed by ACTIVE (real execution)
+        updatedCue.fireExecuted = true;
+      }
       
       // Update legacy variables for compatibility during transition
-      const updatedCue = cueTracker.cues.get(cueId);
       if (updatedCue) {
         activeCues.set(cueId, updatedCue);
+        // Remove from previousCues if it was there (cue became active again)
+        if (previousCues.has(cueId)) {
+          previousCues.delete(cueId);
+          logCueEvent('LEGACY', 'REMOVED FROM PREVIOUS (became active)', cueId);
+        }
         
         // Handle instant cues logging
         if (updatedCue.time === 0 && updatedCue.percentage === '100%') {
@@ -707,6 +830,12 @@ udpPort.on("message", (oscMsg) => {
       const parseResult = parsePreviousCue(fullCueText);
       
       if (parseResult) {
+        // Only process cues from cue list 1
+        if (parseResult.cueList !== '1') {
+          logCueEvent('OSC-FILTERED', `Ignoring PREVIOUS cue from cue list ${parseResult.cueList}`, `${parseResult.cueList}/${parseResult.cueNumber}`, fullCueText);
+          return;
+        }
+        
         const cueId = `${parseResult.cueList}/${parseResult.cueNumber}`;
         
         logCueEvent('PREVIOUS', 'CUE MOVED TO PREVIOUS', cueId, fullCueText);
@@ -731,10 +860,18 @@ udpPort.on("message", (oscMsg) => {
         // Legacy compatibility - clean up displaced previous cues
         const cuesToRemove = Array.from(previousCues).filter(prevCueId => prevCueId !== cueId);
         cuesToRemove.forEach(prevCueId => {
-          // Transition displaced cues to finished
+          // Transition displaced cues to finished (but check valid transitions)
           if (cueTracker.cues.has(prevCueId)) {
-            cueTracker.transitionCueState(prevCueId, CueState.FINISHED, 'Displaced by new previous cue');
-            cueTracker.cleanupFinishedCue(prevCueId);
+            const cue = cueTracker.cues.get(prevCueId);
+            // Only transition if it's a valid transition
+            if (cue.state === CueState.BACKGROUND || cue.state === CueState.STALE) {
+              cueTracker.transitionCueState(prevCueId, CueState.FINISHED, 'Displaced by new previous cue');
+              cueTracker.cleanupFinishedCue(prevCueId);
+            } else {
+              // For other states, just clean up directly
+              logCueEvent('CLEANUP', `Directly cleaning up displaced previous cue in ${cue.state} state`, prevCueId);
+              cueTracker.cleanupFinishedCue(prevCueId);
+            }
           }
           
           if (activeCues.has(prevCueId)) {
