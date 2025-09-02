@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Eos Cue Overlay</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Roboto, sans-serif;
+        color: white;
+        font-weight: 600;
+        text-shadow: 2px 2px 4px #000000;
+        padding: 10px 20px;
+      }
+      
+      #main-cue {
+        font-size: 24px;
+        margin-bottom: 10px;
+      }
+      
+      #running-cues {
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      
+      .cue-item {
+        transition: color 0.5s ease, opacity 1s ease;
+        margin-bottom: 5px;
+      }
+      
+      .cue-flash {
+        color: #00ff00 !important;
+        transition: none;
+      }
+      
+      .cue-running {
+        color: #00ff00;
+      }
+      
+      .cue-completed {
+        color: white;
+        opacity: 0.7;
+      }
+      
+      .cue-fade-out {
+        opacity: 0;
+      }
+      
+      .cue-stale {
+        color: #ff0000;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="main-cue">Waiting for cue...</div>
+    <div id="running-cues"></div>
+
+    <script>
+      const mainCueElement = document.getElementById("main-cue");
+      const runningCuesElement = document.getElementById("running-cues");
+      const WEBSOCKET_PORT = 8081;
+      
+      let activeCueElements = new Map(); // Track DOM elements for each cue
+      let lastFlashedCue = null;
+      let isFlashingInstantCue = false; // Prevent updates during instant cue flash
+
+      function connect() {
+        const ws = new WebSocket(`ws://localhost:${WEBSOCKET_PORT}`);
+
+        ws.onopen = () => {
+          console.log("Connected to WebSocket bridge.");
+          mainCueElement.textContent = "Connected";
+        };
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          console.log(`[OVERLAY] Received data:`, data);
+          
+          // Handle single cue (fallback for unparsed)
+          if (data.singleCue) {
+            mainCueElement.textContent = data.singleCue.raw || "Error parsing cue";
+            return;
+          }
+          
+          // Handle multiple active cues
+          if (data.latestCue) {
+            console.log(`[OVERLAY] Processing ${data.activeCues.length} active cues, latest: ${data.latestCue.cueId}`);
+            updateMainCue(data.latestCue);
+            updateRunningCues(data.activeCues);
+          } else {
+            console.log(`[OVERLAY] No latest cue available`);
+            // Don't clear display - keep showing last cue
+          }
+        };
+
+        ws.onclose = () => {
+          console.log("Disconnected. Retrying in 3 seconds...");
+          mainCueElement.textContent = "Disconnected";
+          runningCuesElement.innerHTML = "";
+          activeCueElements.clear();
+          setTimeout(connect, 3000);
+        };
+
+        ws.onerror = (err) => {
+          console.error("WebSocket error:", err);
+          ws.close();
+        };
+      }
+
+      function updateMainCue(latestCue) {
+        console.log(`[OVERLAY] updateMainCue: ${latestCue.cueId}, isRunning: ${latestCue.isRunning}, percentage: ${latestCue.percentage}`);
+        mainCueElement.textContent = `LXQ: ${latestCue.cueNumber} - ${latestCue.label}`;
+        
+        // Flash for new cues only
+        if (lastFlashedCue !== latestCue.cueId) {
+          lastFlashedCue = latestCue.cueId;
+          console.log(`[OVERLAY] New cue detected: ${latestCue.cueId}`);
+          
+          // Check if this is an instant cue (0.0s runtime)
+          const isInstantCue = latestCue.time === 0 && latestCue.percentage === '100%';
+          
+          if (isInstantCue) {
+            // For instant cues: flash green briefly, then go to completed state
+            console.log(`[OVERLAY] Instant cue - flashing green for ${latestCue.cueId}`);
+            isFlashingInstantCue = true;
+            mainCueElement.className = 'cue-running';
+            setTimeout(() => {
+              console.log(`[OVERLAY] Setting completed class for instant cue ${latestCue.cueId}`);
+              mainCueElement.className = 'cue-completed';
+              isFlashingInstantCue = false;
+            }, 200); // 0.2s green flash
+          } else {
+            // Normal cues: flash then set appropriate state
+            console.log(`[OVERLAY] Setting flash class for ${latestCue.cueId}`);
+            mainCueElement.className = 'cue-flash';
+            setTimeout(() => {
+              if (latestCue.isRunning) {
+                console.log(`[OVERLAY] Setting running class for ${latestCue.cueId}`);
+                mainCueElement.className = 'cue-running';
+              } else {
+                console.log(`[OVERLAY] Setting completed class for ${latestCue.cueId}`);
+                mainCueElement.className = 'cue-completed';
+              }
+            }, 300);
+          }
+        } else if (!isFlashingInstantCue) {
+          // Update existing cue status without flash (unless we're flashing an instant cue)
+          if (latestCue.isStale) {
+            console.log(`[OVERLAY] Updating to stale class for ${latestCue.cueId}`);
+            mainCueElement.className = 'cue-stale';
+          } else if (latestCue.isRunning) {
+            console.log(`[OVERLAY] Updating to running class for ${latestCue.cueId}`);
+            mainCueElement.className = 'cue-running';
+          } else {
+            console.log(`[OVERLAY] Updating to completed class for ${latestCue.cueId}`);
+            mainCueElement.className = 'cue-completed';
+          }
+        } else {
+          console.log(`[OVERLAY] Skipping update - instant cue is flashing`);
+        }
+      }
+
+      function updateRunningCues(activeCues) {
+        // Skip the first cue (it's shown in main display)
+        const runningCues = activeCues.slice(1);
+        
+        // Remove elements for cues no longer active
+        for (const [cueId, element] of activeCueElements) {
+          if (!activeCues.find(cue => cue.cueId === cueId)) {
+            element.classList.add('cue-fade-out');
+            setTimeout(() => {
+              if (element.parentNode) {
+                element.parentNode.removeChild(element);
+              }
+              activeCueElements.delete(cueId);
+            }, 1000);
+          }
+        }
+        
+        // Update or create elements for running cues
+        runningCues.forEach(cue => {
+          let element = activeCueElements.get(cue.cueId);
+          
+          if (!element) {
+            // Create new element
+            element = document.createElement('div');
+            element.className = 'cue-item cue-running';
+            runningCuesElement.appendChild(element);
+            activeCueElements.set(cue.cueId, element);
+          }
+          
+          // Update content and status
+          element.textContent = `${cue.cueNumber} - ${cue.label}`;
+          
+          if (cue.percentage === '100%') {
+            element.className = 'cue-item cue-completed';
+          } else {
+            element.className = 'cue-item cue-running';
+          }
+        });
+      }
+
+      connect();
+    </script>
+  </body>
+</html>
