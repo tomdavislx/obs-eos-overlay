@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:xstate.js.org)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(find:*)",
+      "Bash(timeout 5s npm start)",
+      "Bash(npm test)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(timeout 10s npm start)",
+      "Bash(node:*)",
+      "Bash(lsof:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "outputStyle": "default"
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "description": "Eos-to-OBS Overlay Bridge Configuration",
+  "comment": "Copy this file to 'config.json' and edit your settings",
+
+  "eos": {
+    "host": "10.101.100.101",
+    "port": 3037,
+    "connectionTimeout": 10000,
+    "reconnectMaxAttempts": 0
+  },
+
+  "cueList": 1,
+
+  "useEosConsoleAPI": true,
+
+  "sync": {
+    "syncOnConnect": true,
+    "syncInterval": 300000,
+    "prefetchEnabled": true,
+    "prefetchCount": 2,
+    "cacheTTL": 600000,
+    "cacheMaxSize": 10000
+  },
+
+  "websocket": {
+    "port": 8081,
+    "pingInterval": 30000
+  },
+
+  "cueTracking": {
+    "staleTimeout": 2000,
+    "completionTimeout": 500
+  },
+
+  "logging": {
+    "level": "info",
+    "logOSC": false,
+    "logState": true
+  }
+}
