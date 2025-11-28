@@ -89,7 +89,7 @@ export class EosOverlayBridge extends EventEmitter {
     } else {
       console.log('[EosOverlayBridge] Eos Console API disabled - waiting for OSC messages only');
       // Broadcast that we're "connected" in OSC-only mode
-      this.overlayServer.broadcastConnectionStatus(true);
+      this.overlayServer.broadcastConnectionStatus('connected', 'OSC-only mode');
     }
 
     this.running = true;
@@ -109,7 +109,7 @@ export class EosOverlayBridge extends EventEmitter {
     console.log('[EosOverlayBridge] Stopping...');
 
     // Broadcast disconnection status
-    this.overlayServer.broadcastConnectionStatus(false);
+    this.overlayServer.broadcastConnectionStatus('disconnected', 'Server stopped');
 
     // Stop components
     if (this.connection) {
@@ -237,18 +237,21 @@ export class EosOverlayBridge extends EventEmitter {
    */
   private async handleConnected(): Promise<void> {
     console.log('[EosOverlayBridge] Eos console connected');
-    this.overlayServer.broadcastConnectionStatus(true);
     this.emit('console-connected');
 
     // Initialize data sync after connection is established (if enabled)
     if (this.dataSync) {
       try {
+        this.overlayServer.broadcastConnectionStatus('syncing', 'Loading cue data...');
         await this.dataSync.initialize(this.config.cueList);
         console.log('[EosOverlayBridge] Data sync initialized');
+        this.overlayServer.broadcastConnectionStatus('connected', 'Ready');
       } catch (error) {
         console.error('[EosOverlayBridge] Failed to initialize data sync:', error);
-        // Don't throw - just log the error and continue
+        this.overlayServer.broadcastConnectionStatus('connected', 'Connected (sync failed)');
       }
+    } else {
+      this.overlayServer.broadcastConnectionStatus('connected', 'Ready');
     }
   }
 
@@ -257,7 +260,7 @@ export class EosOverlayBridge extends EventEmitter {
    */
   private handleDisconnected(): void {
     console.warn('[EosOverlayBridge] Eos console disconnected');
-    this.overlayServer.broadcastConnectionStatus(false);
+    this.overlayServer.broadcastConnectionStatus('reconnecting', 'Connection lost, retrying...');
     this.emit('console-disconnected');
   }
 

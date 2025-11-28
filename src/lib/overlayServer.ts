@@ -107,19 +107,21 @@ export class OverlayServer extends EventEmitter {
 
   /**
    * Broadcast connection status to all clients
+   * Status: 'connecting' | 'syncing' | 'connected' | 'disconnected' | 'reconnecting'
    */
-  broadcastConnectionStatus(oscConnected: boolean): void {
-    const message: OverlayMessage = {
+  broadcastConnectionStatus(status: string, message?: string): void {
+    const msg: OverlayMessage = {
       type: OverlayMessageType.CONNECTION_STATUS,
       timestamp: Date.now(),
       data: {
-        connected: oscConnected,
+        status,
+        message,
+        connected: status === 'connected',
         clientCount: this.clients.size,
-        oscConnected,
       },
     };
 
-    this.broadcast(message);
+    this.broadcast(msg);
   }
 
   /**
