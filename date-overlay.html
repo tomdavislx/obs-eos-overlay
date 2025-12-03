@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Date Overlay</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 10px 15px;
+        background-color: rgba(0, 0, 0, 0.5);
+        font-family: "Segoe UI", Roboto, sans-serif;
+      }
+
+      #datetime {
+        color: white;
+        font-size: 14pt;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="datetime"></div>
+
+    <script>
+      function updateDateTime() {
+        const now = new Date();
+        
+        // Format date as dd/mm/yyyy
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = now.getFullYear();
+        
+        // Format time as hh:mm:ss
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        
+        const dateTimeString = `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+        document.getElementById('datetime').textContent = dateTimeString;
+      }
+
+      // Update immediately
+      updateDateTime();
+      
+      // Update every second
+      setInterval(updateDateTime, 1000);
+    </script>
+  </body>
+</html>
+
