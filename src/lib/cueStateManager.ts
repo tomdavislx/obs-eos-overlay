@@ -138,6 +138,11 @@ export class CueStateManager extends EventEmitter {
     if (cue.state === CueState.DISCOVERED || cue.state === CueState.STALE) {
       this.transitionToState(cue, CueState.ACTIVE, 'Received active update');
 
+      // Always set the stale timer on this transition so there is a guaranteed
+      // cleanup path even when no percentage arrives (e.g. seeding from console
+      // state). Subsequent updates will reset or suppress it as appropriate.
+      this.resetStaleTimer(cue);
+
       // When a new cue becomes active, cleanup old FINISHED cues
       for (const [existingCueId, existingCue] of this.cues.entries()) {
         if (existingCueId !== cue.cueId && existingCue.state === CueState.FINISHED) {

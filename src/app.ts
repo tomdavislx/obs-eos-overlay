@@ -294,20 +294,12 @@ export class EosOverlayBridge extends EventEmitter {
     // may never fire (Eos only sends it when the cue changes). Seed the state
     // manager from the library's cached active cue so the overlay shows the
     // current cue immediately rather than waiting for the next Go.
-    const allCues = this.cueManager.getAllCues();
-    const activeCue = this.connection ? this.connection.getActiveCueNumber() : null;
-    const previousCue = this.connection ? this.connection.getPreviousCueNumber() : null;
-    console.log(`[EosOverlayBridge] Post-sync state: tracked cues=${allCues.length}, activeCue=${JSON.stringify(activeCue)}, previousCue=${JSON.stringify(previousCue)}, configCueList=${this.config.cueList}`);
-
-    if (allCues.length === 0 && this.connection) {
+    if (this.cueManager.getAllCues().length === 0 && this.connection) {
+      const activeCue = this.connection.getActiveCueNumber();
       if (activeCue && activeCue.cueList === this.config.cueList) {
         console.log(`[EosOverlayBridge] Seeding active cue from console state: ${activeCue.cueList}/${activeCue.cueNumber}`);
         await this.processActiveCueChange(activeCue);
-      } else {
-        console.log(`[EosOverlayBridge] No active cue to seed (activeCue=${JSON.stringify(activeCue)})`);
       }
-    } else {
-      console.log(`[EosOverlayBridge] Skipping seed: already tracking ${allCues.length} cue(s)`);
     }
   }
 
