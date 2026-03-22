@@ -33,6 +33,8 @@ export class EosOverlayBridge extends EventEmitter {
   private running: boolean = false;
   private initialSyncComplete: boolean = false;
   private bufferedActiveCueEvents: Array<{ cueList: number; cueNumber: number }> = [];
+  private currentConnectionStatus: string = 'connecting';
+  private currentConnectionMessage: string = '';
 
   constructor(config: Config) {
     super();
@@ -89,7 +91,7 @@ export class EosOverlayBridge extends EventEmitter {
     } else {
       console.log('[EosOverlayBridge] Eos Console API disabled - waiting for OSC messages only');
       // Broadcast that we're "connected" in OSC-only mode
-      this.overlayServer.broadcastConnectionStatus('connected', 'OSC-only mode');
+      this.broadcastConnectionStatus('connected', 'OSC-only mode');
     }
 
     this.running = true;
@@ -109,7 +111,7 @@ export class EosOverlayBridge extends EventEmitter {
     console.log('[EosOverlayBridge] Stopping...');
 
     // Broadcast disconnection status
-    this.overlayServer.broadcastConnectionStatus('disconnected', 'Server stopped');
+    this.broadcastConnectionStatus('disconnected', 'Server stopped');
 
     // Stop components
     if (this.connection) {
@@ -223,7 +225,8 @@ export class EosOverlayBridge extends EventEmitter {
 
     // Overlay server events
     this.overlayServer.on('client-connected', (client: any) => {
-      // Send current state to new client
+      // Send current connection status and cue state to new client
+      this.overlayServer.broadcastConnectionStatus(this.currentConnectionStatus, this.currentConnectionMessage);
       this.broadcastCueUpdate();
     });
 
@@ -242,16 +245,16 @@ export class EosOverlayBridge extends EventEmitter {
     // Initialize data sync after connection is established (if enabled)
     if (this.dataSync) {
       try {
-        this.overlayServer.broadcastConnectionStatus('syncing', 'Loading cue data...');
+        this.broadcastConnectionStatus('syncing', 'Loading cue data...');
         await this.dataSync.initialize(this.config.cueList);
         console.log('[EosOverlayBridge] Data sync initialized');
-        this.overlayServer.broadcastConnectionStatus('connected', 'Ready');
+        this.broadcastConnectionStatus('connected', 'Ready');
       } catch (error) {
         console.error('[EosOverlayBridge] Failed to initialize data sync:', error);
-        this.overlayServer.broadcastConnectionStatus('connected', 'Connected (sync failed)');
+        this.broadcastConnectionStatus('connected', 'Connected (sync failed)');
       }
     } else {
-      this.overlayServer.broadcastConnectionStatus('connected', 'Ready');
+      this.broadcastConnectionStatus('connected', 'Ready');
     }
   }
 
@@ -260,7 +263,7 @@ export class EosOverlayBridge extends EventEmitter {
    */
   private handleDisconnected(): void {
     console.warn('[EosOverlayBridge] Eos console disconnected');
-    this.overlayServer.broadcastConnectionStatus('reconnecting', 'Connection lost, retrying...');
+    this.broadcastConnectionStatus('reconnecting', 'Connection lost, retrying...');
     this.emit('console-disconnected');
   }
 
@@ -285,6 +288,26 @@ export class EosOverlayBridge extends EventEmitter {
         await this.processActiveCueChange(event);
       }
       this.bufferedActiveCueEvents = [];
+    }
+
+    // If the console was sitting idle when we connected, the active-cue event
+    // may never fire (Eos only sends it when the cue changes). Seed the state
+    // manager from the library's cached active cue so the overlay shows the
+    // current cue immediately rather than waiting for the next Go.
+    const allCues = this.cueManager.getAllCues();
+    const activeCue = this.connection ? this.connection.getActiveCueNumber() : null;
+    const previousCue = this.connection ? this.connection.getPreviousCueNumber() : null;
+    console.log(`[EosOverlayBridge] Post-sync state: tracked cues=${allCues.length}, activeCue=${JSON.stringify(activeCue)}, previousCue=${JSON.stringify(previousCue)}, configCueList=${this.config.cueList}`);
+
+    if (allCues.length === 0 && this.connection) {
+      if (activeCue && activeCue.cueList === this.config.cueList) {
+        console.log(`[EosOverlayBridge] Seeding active cue from console state: ${activeCue.cueList}/${activeCue.cueNumber}`);
+        await this.processActiveCueChange(activeCue);
+      } else {
+        console.log(`[EosOverlayBridge] No active cue to seed (activeCue=${JSON.stringify(activeCue)})`);
+      }
+    } else {
+      console.log(`[EosOverlayBridge] Skipping seed: already tracking ${allCues.length} cue(s)`);
     }
   }
 
@@ -324,7 +347,7 @@ export class EosOverlayBridge extends EventEmitter {
           String(data.cueNumber),
           cueData.label || '',
           fadeTimeSec,
-          '0%', // Percentage not available from this event
+          null, // Percentage not available from this event; real value comes via active-cue-text
           `${data.cueList}/${data.cueNumber} ${cueData.label || ''}`
         );
       } else {
@@ -334,7 +357,7 @@ export class EosOverlayBridge extends EventEmitter {
           String(data.cueNumber),
           '',
           0,
-          '0%',
+          null, // Percentage not available from this event
           `${data.cueList}/${data.cueNumber}`
         );
       }
@@ -345,7 +368,7 @@ export class EosOverlayBridge extends EventEmitter {
         String(data.cueNumber),
         '',
         0,
-        '0%',
+        null, // Percentage not available from this event
         `${data.cueList}/${data.cueNumber}`
       );
     }
@@ -484,6 +507,12 @@ export class EosOverlayBridge extends EventEmitter {
   /**
    * Broadcast cue update to overlay
    */
+  private broadcastConnectionStatus(status: string, message: string = ''): void {
+    this.currentConnectionStatus = status;
+    this.currentConnectionMessage = message;
+    this.overlayServer.broadcastConnectionStatus(status, message);
+  }
+
   private broadcastCueUpdate(): void {
     const activeCues = this.cueManager.getActiveCues();
     this.overlayServer.broadcastCueUpdate(activeCues);

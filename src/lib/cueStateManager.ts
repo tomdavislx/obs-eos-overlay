@@ -132,6 +132,20 @@ export class CueStateManager extends EventEmitter {
       this.addProgressEntry(cue, percentage);
     }
 
+    // Always transition DISCOVERED → ACTIVE when we receive any active-cue
+    // update, even without a percentage. The cue is the active cue on the
+    // desk and must appear in the overlay. Stale/finish logic handles cleanup.
+    if (cue.state === CueState.DISCOVERED || cue.state === CueState.STALE) {
+      this.transitionToState(cue, CueState.ACTIVE, 'Received active update');
+
+      // When a new cue becomes active, cleanup old FINISHED cues
+      for (const [existingCueId, existingCue] of this.cues.entries()) {
+        if (existingCueId !== cue.cueId && existingCue.state === CueState.FINISHED) {
+          this.cleanupCue(existingCueId);
+        }
+      }
+    }
+
     // State transitions based on percentage
     if (percentage) {
       const percentValue = parseInt(percentage.replace('%', ''), 10);
@@ -145,18 +159,6 @@ export class CueStateManager extends EventEmitter {
           // Background cue reached 100%, cleanup immediately
           this.cleanupCue(cue.cueId);
         }
-      } else {
-        // Still running
-        if (cue.state === CueState.DISCOVERED || cue.state === CueState.STALE) {
-          this.transitionToState(cue, CueState.ACTIVE, 'Received active update');
-
-          // When a new cue becomes active, cleanup old FINISHED cues
-          for (const [existingCueId, existingCue] of this.cues.entries()) {
-            if (existingCueId !== cue.cueId && existingCue.state === CueState.FINISHED) {
-              this.cleanupCue(existingCueId);
-            }
-          }
-        }
       }
     }
 
@@ -165,8 +167,13 @@ export class CueStateManager extends EventEmitter {
       this.enrichCueData(cue);
     }
 
-    // Reset stale timer
-    this.resetStaleTimer(cue);
+    // Only reset the stale timer if percentage is actively changing.
+    // - No percentage at all: don't reset (stale timer fires → FINISHED)
+    // - Stagnant percentage (same value 3+ times): don't reset (same result)
+    // - Changing percentage: reset (cue is genuinely running)
+    if (this.isPercentageProgressing(cue, percentage)) {
+      this.resetStaleTimer(cue);
+    }
 
     this.emit('cue-updated', cue);
   }
@@ -495,10 +502,20 @@ export class CueStateManager extends EventEmitter {
   private handleStaleTimeout(cue: CueData): void {
     // Only mark as stale if in active states
     if (
+      cue.state === CueState.DISCOVERED ||
       cue.state === CueState.ACTIVE ||
       cue.state === CueState.COMPLETING ||
       cue.state === CueState.BACKGROUND
     ) {
+      // If the cue never made progress (percentage was static the whole time),
+      // it was likely already completed when we first connected. Treat it as
+      // FINISHED rather than STALE so the overlay shows it as completed.
+      if (!this.cueHadProgressingUpdates(cue)) {
+        this.transitionToState(cue, CueState.FINISHED, 'No percentage progress - assumed already complete');
+        this.emit('cue-finished', cue);
+        return;
+      }
+
       this.transitionToState(cue, CueState.STALE, 'No updates received');
       this.emit('cue-stale', cue);
 
@@ -510,6 +527,35 @@ export class CueStateManager extends EventEmitter {
         }, this.staleTimeout * 3); // 3x stale timeout = 6 seconds default
       }
     }
+  }
+
+  /**
+   * Check if a cue has received progressing (changing) percentage updates.
+   * A cue with static/non-advancing percentage was likely already complete
+   * when we first connected.
+   */
+  private cueHadProgressingUpdates(cue: CueData): boolean {
+    const history = cue.progressHistory;
+    if (history.length < 2) return false;
+
+    const firstPercent = history[0].percentage;
+    return history.some(entry => entry.percentage !== firstPercent);
+  }
+
+  /**
+   * Returns true if the cue's percentage is actively changing (not stagnant).
+   * Looks at the last 3 progress entries — if they're all the same, the cue
+   * is not progressing and we should let the stale timer run out.
+   */
+  private isPercentageProgressing(cue: CueData, currentPercentage: string | null): boolean {
+    if (!currentPercentage) return false; // No percentage info — don't reset stale timer
+
+    const history = cue.progressHistory;
+    if (history.length < 3) return true; // Not enough history yet
+
+    // If the last 3 entries are all the same as the current value, stagnant
+    const last3 = history.slice(-3);
+    return last3.some(entry => entry.percentage !== currentPercentage);
   }
 
 

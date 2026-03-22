@@ -119,6 +119,10 @@
         ws.onopen = () => {
           console.log("Connected to WebSocket bridge.");
           updateStatus('connecting', 'Connected to server');
+          // Clear any "Waiting for connection..." text left from a previous disconnect
+          if (mainCueElement.textContent === "Waiting for connection...") {
+            mainCueElement.textContent = "Waiting for cue...";
+          }
         };
 
         ws.onmessage = (event) => {
@@ -131,6 +135,8 @@
               updateMainCue(data.latestCue);
               updateRunningCues(data.activeCues);
             }
+            // If no active cues, leave the display as-is — the console is almost
+            // certainly sitting on a completed cue that will arrive shortly.
           } else if (message.type === 'CONNECTION_STATUS') {
             // Update status display
             if (message.data.status) {

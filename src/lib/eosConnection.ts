@@ -155,6 +155,25 @@ export class EosConnection extends EventEmitter {
   }
 
   /**
+   * Get current active cue number from console state
+   * Returns the identifier immediately from the library's cached state.
+   */
+  getActiveCueNumber(): { cueList: number; cueNumber: number } | null {
+    if (!this.console || !this.isConnected()) return null;
+    const active = this.console.activeCueNumber;
+    return active ? { cueList: active.cueList, cueNumber: active.cueNumber } : null;
+  }
+
+  /**
+   * Get current previous cue number from console state
+   */
+  getPreviousCueNumber(): { cueList: number; cueNumber: number } | null {
+    if (!this.console || !this.isConnected()) return null;
+    const previous = this.console.previousCueNumber;
+    return previous ? { cueList: previous.cueList, cueNumber: previous.cueNumber } : null;
+  }
+
+  /**
    * Get console version
    */
   async getVersion(): Promise<EosConsoleVersion> {
@@ -234,10 +253,12 @@ export class EosConnection extends EventEmitter {
     // High-level active cue event (fires once when cue changes)
     this.console.on('active-cue', (data: any) => {
       console.log('[EosConnection] Active cue changed:', data);
-      this.emit('active-cue-change', {
-        cueList: data.cue.cueList,
-        cueNumber: data.cue.cueNumber,
-      });
+      if (data.cue) {
+        this.emit('active-cue-change', {
+          cueList: data.cue.cueList,
+          cueNumber: data.cue.cueNumber,
+        });
+      }
     });
 
     // Active cue text updates (fires continuously with time/percentage)
@@ -254,10 +275,12 @@ export class EosConnection extends EventEmitter {
     // Previous cue event (fires when cue moves to previous list)
     this.console.on('previous-cue', (data: any) => {
       console.log('[EosConnection] Previous cue:', data);
-      this.emit('previous-cue-change', {
-        cueList: data.cue.cueList,
-        cueNumber: data.cue.cueNumber,
-      });
+      if (data.cue) {
+        this.emit('previous-cue-change', {
+          cueList: data.cue.cueList,
+          cueNumber: data.cue.cueNumber,
+        });
+      }
     });
 
     // Raw OSC messages (fallback for unhandled messages)
