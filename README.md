@@ -9,7 +9,7 @@ Real-time lighting cue overlay for OBS Studio, synced with ETC Eos lighting cons
 - **Smart Caching**: Three-tier caching strategy (initial sync + on-demand + prefetch)
 - **Automatic Reconnection**: Exponential backoff with infinite retry attempts
 - **State Management**: Tracks cue lifecycle through DISCOVERED → ACTIVE → COMPLETING → FINISHED
-- **WebSocket Broadcast**: Real-time updates to OBS overlay clients
+- **Overlay HTTP + WebSocket**: Serves `overlay.html` and cue updates on one port (reliable in OBS’s browser)
 
 ## Quick Start
 
@@ -67,7 +67,7 @@ SYNC_INTERVAL=300000
 PREFETCH_ENABLED=true
 CACHE_TTL=600000
 
-# WebSocket
+# Overlay (HTTP page + WebSocket on same port)
 WEBSOCKET_PORT=8081
 
 # Logging
@@ -78,10 +78,14 @@ LOG_STATE=true
 
 ## OBS Setup
 
-1. Add a **Browser Source** in OBS
-2. Set **Local file** to: `/path/to/obs-eos-overlay/overlay.html`
-3. Set dimensions (e.g., 1920x1080)
-4. The overlay will automatically connect to `ws://localhost:8081`
+1. Start the bridge (`npm run dev` or `npm start`).
+2. Add a **Browser Source** in OBS.
+3. Set the URL to **`http://127.0.0.1:8081/`** (use your `WEBSOCKET_PORT` if you changed it).  
+   **Do not use “Local file”** for the overlay: OBS’s embedded browser often blocks WebSocket from `file://`, while a normal desktop browser still works with a local file.
+4. If the bridge runs on another computer, use **`http://<bridge-machine-LAN-IP>:8081/`** instead.
+5. Set dimensions (e.g. 1920×1080).
+
+The page and WebSocket share the same host and port, so no extra query parameters are needed unless you intentionally override them (`?bridgeHost=` / `?bridgePort=`).
 
 ## Eos Console Setup
 
@@ -140,7 +144,7 @@ Use the built-in launch configurations:
 - **src/lib/cueDataSync.ts** - Cue data caching and synchronization
 - **src/lib/cueStateManager.ts** - Cue lifecycle state management
 - **src/lib/oscParser.ts** - OSC message parsing
-- **src/lib/overlayServer.ts** - WebSocket server
+- **src/lib/overlayServer.ts** - HTTP server for `overlay.html` + WebSocket cue broadcast (same port)
 
 ## Troubleshooting
 
@@ -164,10 +168,11 @@ Use the built-in launch configurations:
 
 ### Overlay Issues
 
-**Overlay not updating:**
-1. Check WebSocket connection in browser console
-2. Verify `WEBSOCKET_PORT=8081`
-3. Reload browser source in OBS
+**Overlay not updating or stuck “waiting for bridge WebSocket”:**
+1. Use **`http://127.0.0.1:<WEBSOCKET_PORT>/`** in the Browser Source, not a path to `overlay.html` on disk.
+2. Confirm the bridge log shows the overlay URL and `[OverlayServer] Client connected`.
+3. Open the same URL in Chrome/Safari on that machine; if it works there but not in OBS, the URL is correct and the issue is OBS-specific cache or source settings—refresh the Browser Source.
+4. From another PC, the URL must be the **bridge machine’s** IP, not `127.0.0.1` on the OBS machine.
 
 **Incorrect timing:**
 1. Ensure the bridge can connect to the console on port `3037` for accurate fade times

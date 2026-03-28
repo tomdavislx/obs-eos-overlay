@@ -65,7 +65,7 @@ See `config.example.json` for all available options with comments.
 - **eos.host** - Console IP address (e.g., "10.101.100.101")
 - **eos.port** - Console port (default: 3037)
 - **cueList** - Which cue list to track (default: 1)
-- **websocket.port** - Port for OBS overlay connection (default: 8081)
+- **websocket.port** - Serves the overlay page **and** the WebSocket on this port (default: 8081). In OBS, use **`http://127.0.0.1:<port>/`** as the Browser Source URL (not a local `file://` path).
 
 ## Environment Variables (Optional)
 
@@ -79,7 +79,7 @@ Available variables:
 - `EOS_HOST` - Console IP
 - `EOS_PORT` - Console port
 - `CUE_LIST` - Cue list number
-- `WEBSOCKET_PORT` - WebSocket port
+- `WEBSOCKET_PORT` - Overlay HTTP + WebSocket port (same port for both)
 - `LOG_OSC` - Log OSC messages (true/false)
 - `LOG_STATE` - Log state transitions (true/false)
 

@@ -19,8 +19,8 @@ This is an OSC-to-WebSocket bridge application that receives lighting cue data f
 - **src/lib/cueDataSync.ts**: Cue data caching and synchronization
 - **src/lib/cueStateManager.ts**: Simplified cue state management
 - **src/lib/oscParser.ts**: OSC message parsing utilities
-- **src/lib/overlayServer.ts**: WebSocket server for overlay clients
-- **overlay.html**: Browser-based overlay for OBS Studio
+- **src/lib/overlayServer.ts**: HTTP + WebSocket on one port (serves `overlay.html`, cue updates)
+- **overlay.html**: Browser-based overlay for OBS Studio (load via `http://127.0.0.1:<WEBSOCKET_PORT>/` in OBS)
 
 ## Architecture
 
@@ -49,9 +49,9 @@ The application uses a clean, modular architecture with event-driven components:
 - Manages stale detection and auto-completion timers
 
 **OverlayServer** (src/lib/overlayServer.ts):
-- WebSocket server on port 8081
-- Broadcasts cue updates to overlay clients
-- Ping/pong heartbeat for connection health
+- HTTP server on `websocket.port` (GET `/` and `/overlay.html` → `overlay.html` from repo root)
+- WebSocket on the same TCP port for cue updates (OBS: avoid `file://`; use `http://127.0.0.1:PORT/`)
+- Broadcasts cue updates to overlay clients; ping/pong heartbeat for connection health
 
 **EosOverlayBridge** (src/app.ts):
 - Main orchestrator coordinating all components
@@ -118,8 +118,8 @@ SYNC_INTERVAL=300000                # Full sync interval in ms (5 min)
 PREFETCH_ENABLED=true               # Enable smart prefetch
 CACHE_TTL=600000                    # Cache TTL in ms (10 min)
 
-# === WebSocket Server ===
-WEBSOCKET_PORT=8081                 # Port for overlay clients
+# === Overlay (HTTP + WebSocket, same port) ===
+WEBSOCKET_PORT=8081                 # HTTP page + WebSocket (OBS URL: http://127.0.0.1:8081/)
 WEBSOCKET_PING_INTERVAL=30000       # Ping interval in ms
 
 # === Logging ===
@@ -146,7 +146,7 @@ LOG_STATE=true                      # Log state transitions
 
 ## Usage in OBS
 
-The overlay.html file should be added as a Browser Source in OBS Studio, pointing to the local file path. The overlay displays:
+Add a **Browser Source** with URL **`http://127.0.0.1:<WEBSOCKET_PORT>/`** (same port as `WEBSOCKET_PORT` / `config.websocket.port`). Do not rely on **Local file** → `overlay.html`: OBS’s CEF often blocks WebSocket from `file://`. The overlay displays:
 - Main cue in large text with visual state indicators (running=green, completed=white, stale=red)
 - Background running cues in smaller text below
 - Flash animation for newly detected cues
@@ -177,6 +177,7 @@ The overlay.html file should be added as a Browser Source in OBS Studio, pointin
 - `resetStaleTimer()`: Manages stale detection for active cues
 
 **OverlayServer** (src/lib/overlayServer.ts):
+- Serves `overlay.html` over HTTP on the overlay port; WebSocket upgrades on the same server
 - `broadcastCueUpdate()`: Send cue updates to all connected overlay clients
 - `broadcastConnectionStatus()`: Inform overlays of console connection state
 - `pingClients()`: Heartbeat for connection health

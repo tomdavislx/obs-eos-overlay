@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "description": "Eos-to-OBS Overlay Bridge Configuration",
+  "description": "Eos-to-OBS Overlay Bridge Configuration. OBS Browser Source URL: http://127.0.0.1:<websocket.port>/ (same as WEBSOCKET_PORT; do not use file:// overlay path in OBS).",
   "comment": "Copy this file to 'config.json' and edit your settings",
 
   "eos": {
