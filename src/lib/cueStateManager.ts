@@ -79,7 +79,11 @@ export class CueStateManager extends EventEmitter {
     }
 
     // Transition to ACTIVE
-    this.transitionToState(cue, CueState.ACTIVE, 'Cue fired');
+    if (!this.transitionToState(cue, CueState.ACTIVE, 'Cue fired')) {
+      console.warn(
+        `[CueStateManager] Could not promote ${cue.cueId} to ACTIVE after FIRE (state=${cue.state})`
+      );
+    }
 
     // Fetch enhanced data from console if available
     if (this.dataSync) {
@@ -234,15 +238,17 @@ export class CueStateManager extends EventEmitter {
 
     for (const cue of this.cues.values()) {
       if (
+        cue.state === CueState.DISCOVERED ||
         cue.state === CueState.ACTIVE ||
         cue.state === CueState.COMPLETING ||
         cue.state === CueState.BACKGROUND ||
-        cue.state === CueState.FINISHED
+        cue.state === CueState.FINISHED ||
+        cue.state === CueState.STALE
       ) {
         // Add computed properties for overlay
         cue.isRunning = cue.state === CueState.ACTIVE || cue.state === CueState.COMPLETING;
         cue.isBackgroundRunning = cue.state === CueState.BACKGROUND;
-        cue.isStale = false; // Active cues are not stale
+        cue.isStale = cue.state === CueState.STALE;
 
         activeCues.push(cue);
       }
@@ -257,7 +263,9 @@ export class CueStateManager extends EventEmitter {
         if (state === CueState.ACTIVE || state === CueState.COMPLETING) return 1;
         if (state === CueState.FINISHED) return 2;
         if (state === CueState.BACKGROUND) return 3;
-        return 4;
+        if (state === CueState.STALE) return 4;
+        if (state === CueState.DISCOVERED) return 5;
+        return 6;
       };
 
       const priorityA = getPriority(a.state);
@@ -376,10 +384,6 @@ export class CueStateManager extends EventEmitter {
     this.cues.set(cueId, cue);
     this.cueTimers.set(cueId, { staleTimer: null, completionTimer: null });
 
-    if (this.enableStateLogging) {
-      console.log(`[CueStateManager] Created cue ${cueId} (source: ${source})`);
-    }
-
     this.emit('cue-created', cue);
 
     return cue;
@@ -401,10 +405,6 @@ export class CueStateManager extends EventEmitter {
     // Update state
     cue.state = newState;
     cue.lastStateChange = Date.now();
-
-    if (this.enableStateLogging) {
-      console.log(`[CueStateManager] ${cue.cueId}: ${oldState} → ${newState} (${reason})`);
-    }
 
     this.emit('state-changed', { cue, oldState, newState, reason });
 
@@ -618,10 +618,6 @@ export class CueStateManager extends EventEmitter {
     const cue = this.cues.get(cueId);
     if (cue) {
       this.cues.delete(cueId);
-
-      if (this.enableStateLogging) {
-        console.log(`[CueStateManager] Cleaned up cue ${cueId}`);
-      }
 
       this.emit('cue-removed', cue);
     }

@@ -59,7 +59,7 @@ Set these environment variables or use the launch configuration:
 OSC_PROTOCOL=TCP
 EOS_HOST=10.101.100.101
 OSC_PORT=3037
-USE_EOS_CONSOLE_API=false  # Disable to avoid port conflict
+# USE_EOS_CONSOLE_API has been removed; Eos console API is now mandatory.
 ```
 
 Or use the VS Code launch configuration: **"Run Server (TCP OSC)"**

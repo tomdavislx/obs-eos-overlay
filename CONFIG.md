@@ -65,7 +65,6 @@ See `config.example.json` for all available options with comments.
 - **eos.host** - Console IP address (e.g., "10.101.100.101")
 - **eos.port** - Console port (default: 3037)
 - **cueList** - Which cue list to track (default: 1)
-- **useEosConsoleAPI** - Enable enhanced mode with accurate fade times (default: true)
 - **websocket.port** - Port for OBS overlay connection (default: 8081)
 
 ## Environment Variables (Optional)
@@ -81,7 +80,6 @@ Available variables:
 - `EOS_PORT` - Console port
 - `CUE_LIST` - Cue list number
 - `WEBSOCKET_PORT` - WebSocket port
-- `USE_EOS_CONSOLE_API` - Enable/disable API (true/false)
 - `LOG_OSC` - Log OSC messages (true/false)
 - `LOG_STATE` - Log state transitions (true/false)
 

@@ -55,7 +55,6 @@ Set environment variables or create a `.env` file:
 # Eos Console
 EOS_HOST=10.101.100.101
 EOS_PORT=3037
-USE_EOS_CONSOLE_API=true
 
 # Cue Tracking
 CUE_LIST=1
@@ -154,7 +153,7 @@ Use the built-in launch configurations:
 4. Test with: `npm run test:tcp`
 
 **No cue data:**
-1. Verify `USE_EOS_CONSOLE_API=true`
+1. Verify the bridge can connect to the console on port `3037`
 2. Check cue list number is correct
 3. Run: `npm run test:connection`
 
@@ -171,7 +170,7 @@ Use the built-in launch configurations:
 3. Reload browser source in OBS
 
 **Incorrect timing:**
-1. Ensure `USE_EOS_CONSOLE_API=true` for accurate fade times
+1. Ensure the bridge can connect to the console on port `3037` for accurate fade times
 2. Check console cue list has timing data
 3. Watch for sync logs in console output
 

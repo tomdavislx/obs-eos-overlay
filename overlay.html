@@ -85,7 +85,39 @@
       const statusElement = document.getElementById("status");
       const mainCueElement = document.getElementById("main-cue");
       const runningCuesElement = document.getElementById("running-cues");
-      const WEBSOCKET_PORT = 8081;
+      /**
+       * WebSocket URL for the bridge (same port as HTTP when page is served by the bridge).
+       * OBS Browser Source: use http://127.0.0.1:8081/ (or your WEBSOCKET_PORT), not file:// —
+       * embedded Chromium often blocks file:// → WebSocket.
+       * Remote bridge: open http://<bridge-ip>:8081/ or file://…?bridgeHost=<ip>&bridgePort=8081
+       */
+      const qs = new URLSearchParams(window.location.search || "");
+      function computeBridgeWsUrl() {
+        const hostParam = qs.get("bridgeHost") || qs.get("wsHost");
+        const portStr = qs.get("bridgePort") || qs.get("wsPort");
+        const portNum =
+          portStr != null && portStr !== ""
+            ? Number(portStr) || 8081
+            : null;
+
+        if (hostParam) {
+          const p = portNum ?? 8081;
+          return `ws://${hostParam}:${p}`;
+        }
+
+        if (
+          window.location.protocol === "http:" ||
+          window.location.protocol === "https:"
+        ) {
+          const scheme =
+            window.location.protocol === "https:" ? "wss:" : "ws:";
+          return `${scheme}//${window.location.host}`;
+        }
+
+        const p = portNum ?? 8081;
+        return `ws://127.0.0.1:${p}`;
+      }
+      const bridgeWsUrl = () => computeBridgeWsUrl();
 
       let activeCueElements = new Map(); // Track DOM elements for each cue
       let lastFlashedCue = null;
@@ -114,19 +146,30 @@
       }
 
       function connect() {
-        const ws = new WebSocket(`ws://localhost:${WEBSOCKET_PORT}`);
+        const wsUrl = bridgeWsUrl();
+        console.log("Connecting to bridge WebSocket:", wsUrl);
+        const ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
           console.log("Connected to WebSocket bridge.");
-          updateStatus('connecting', 'Connected to server');
-          // Clear any "Waiting for connection..." text left from a previous disconnect
-          if (mainCueElement.textContent === "Waiting for connection...") {
+          // Server sends CONNECTION_STATUS next; "syncing" reads as actively linked
+          updateStatus("syncing", "Bridge socket open…");
+          if (
+            mainCueElement.textContent.startsWith("Waiting for bridge") ||
+            mainCueElement.textContent === "Waiting for connection..."
+          ) {
             mainCueElement.textContent = "Waiting for cue...";
           }
         };
 
         ws.onmessage = (event) => {
-          const message = JSON.parse(event.data);
+          let message;
+          try {
+            message = JSON.parse(event.data);
+          } catch (e) {
+            console.error("Overlay: bad JSON from bridge", e, event.data);
+            return;
+          }
 
           // Handle different message types
           if (message.type === 'CUE_UPDATE') {
@@ -153,18 +196,29 @@
           }
         };
 
-        ws.onclose = () => {
-          console.log("Disconnected. Retrying in 3 seconds...");
-          updateStatus('disconnected', 'Retrying in 3s...');
-          mainCueElement.textContent = "Waiting for connection...";
+        ws.onclose = (ev) => {
+          const code = ev.code;
+          const reason = (ev.reason && String(ev.reason).trim()) || "—";
+          console.warn(
+            "Overlay WebSocket closed. code=%s reason=%s target=%s",
+            code,
+            reason,
+            wsUrl
+          );
+          // 1006 = abnormal (no close frame): wrong host/port, firewall, server down, etc.
+          updateStatus(
+            "disconnected",
+            `No bridge WS — retry in 3s  ${bridgeWsUrl()}  (close ${code})`
+          );
+          mainCueElement.textContent =
+            "Waiting for bridge WebSocket — in OBS use http://127.0.0.1:PORT/ not a local file";
           runningCuesElement.innerHTML = "";
           activeCueElements.clear();
           setTimeout(connect, 3000);
         };
 
         ws.onerror = (err) => {
-          console.error("WebSocket error:", err);
-          ws.close();
+          console.error("WebSocket error (see close event for code):", err, wsUrl);
         };
       }
 

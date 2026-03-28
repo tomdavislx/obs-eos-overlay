@@ -1,9 +1,13 @@
 /**
  * OverlayServer
- * WebSocket server for broadcasting cue data to OBS overlay clients
+ * HTTP (overlay page) + WebSocket (cue updates) on one port.
+ * OBS Browser Source often fails WebSocket from file://; use http://127.0.0.1:PORT/ in OBS.
  */
 
 import { EventEmitter } from 'events';
+import * as fs from 'fs';
+import * as http from 'http';
+import * as path from 'path';
 import WebSocket, { WebSocketServer } from 'ws';
 import { CueData } from '../types/cue';
 import { OverlayMessageType, OverlayMessage } from '../types/websocket';
@@ -16,49 +20,85 @@ interface Client {
 }
 
 export class OverlayServer extends EventEmitter {
-  private server: WebSocketServer | null = null;
+  private httpServer: http.Server | null = null;
+  private wss: WebSocketServer | null = null;
   private clients: Map<string, Client> = new Map();
   private port: number;
   private pingInterval: number;
   private pingTimer: NodeJS.Timeout | null = null;
   private nextClientId: number = 1;
+  private readonly overlayHtmlPath: string;
 
   constructor(config: { port: number; pingInterval: number }) {
     super();
     this.port = config.port;
     this.pingInterval = config.pingInterval;
+    this.overlayHtmlPath = path.join(__dirname, '..', '..', 'overlay.html');
   }
 
   /**
-   * Start WebSocket server
+   * Start HTTP + WebSocket server (same TCP port)
    */
   start(): void {
-    if (this.server) {
+    if (this.httpServer || this.wss) {
       throw new Error('OverlayServer is already running');
     }
 
-    console.log(`[OverlayServer] Starting WebSocket server on port ${this.port}...`);
+    console.log(`[OverlayServer] Starting HTTP + WebSocket on port ${this.port}...`);
 
-    this.server = new WebSocketServer({ port: this.port });
+    let overlayBody: string;
+    try {
+      overlayBody = fs.readFileSync(this.overlayHtmlPath, 'utf8');
+    } catch (e) {
+      console.error('[OverlayServer] Could not read overlay.html at', this.overlayHtmlPath, e);
+      throw e;
+    }
 
-    this.server.on('connection', (socket: WebSocket) => {
+    this.httpServer = http.createServer((req, res) => {
+      const rawUrl = req.url?.split('?')[0] || '/';
+      if (req.method === 'GET' && (rawUrl === '/' || rawUrl === '/overlay.html')) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.end(overlayBody);
+        return;
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not found');
+    });
+
+    this.wss = new WebSocketServer({ server: this.httpServer });
+
+    this.wss.on('connection', (socket: WebSocket) => {
       this.handleConnection(socket);
     });
 
-    this.server.on('error', (error: Error) => {
-      console.error('[OverlayServer] Server error:', error);
+    this.wss.on('error', (error: Error) => {
+      console.error('[OverlayServer] WebSocket server error:', error);
       this.emit('error', error);
     });
 
-    // Start ping interval
-    this.startPingInterval();
+    this.httpServer.on('error', (error: Error) => {
+      console.error('[OverlayServer] HTTP server error:', error);
+      this.emit('error', error);
+    });
 
-    console.log(`[OverlayServer] WebSocket server started on port ${this.port}`);
-    this.emit('started');
+    this.httpServer.listen(this.port, '0.0.0.0', () => {
+      console.log(
+        `[OverlayServer] Overlay page: http://127.0.0.1:${this.port}/  (OBS: use this URL, not a local file — CEF blocks file→WebSocket)`
+      );
+      console.log(
+        `[OverlayServer] WebSocket: ws://127.0.0.1:${this.port}  (from another PC: http://<bridge-LAN-IP>:${this.port}/ )`
+      );
+      this.emit('started');
+    });
+
+    this.startPingInterval();
   }
 
   /**
-   * Stop WebSocket server
+   * Stop HTTP + WebSocket server
    */
   stop(): void {
     if (this.pingTimer) {
@@ -66,7 +106,6 @@ export class OverlayServer extends EventEmitter {
       this.pingTimer = null;
     }
 
-    // Close all client connections
     for (const client of this.clients.values()) {
       try {
         client.socket.close();
@@ -76,13 +115,32 @@ export class OverlayServer extends EventEmitter {
     }
     this.clients.clear();
 
-    // Close server
-    if (this.server) {
-      this.server.close(() => {
-        console.log('[OverlayServer] WebSocket server stopped');
+    const wss = this.wss;
+    const httpServer = this.httpServer;
+    this.wss = null;
+    this.httpServer = null;
+
+    if (wss) {
+      wss.close((err) => {
+        if (err) {
+          console.error('[OverlayServer] WebSocketServer.close:', err);
+        }
+        if (httpServer) {
+          httpServer.close(() => {
+            console.log('[OverlayServer] HTTP/WebSocket server stopped');
+            this.emit('stopped');
+          });
+        } else {
+          this.emit('stopped');
+        }
+      });
+    } else if (httpServer) {
+      httpServer.close(() => {
+        console.log('[OverlayServer] HTTP server stopped');
         this.emit('stopped');
       });
-      this.server = null;
+    } else {
+      this.emit('stopped');
     }
   }
 
@@ -217,7 +275,6 @@ export class OverlayServer extends EventEmitter {
   private handleMessage(client: Client, data: WebSocket.Data): void {
     try {
       const message = JSON.parse(data.toString());
-      console.log(`[OverlayServer] Message from ${client.id}:`, message);
       this.emit('client-message', { client, message });
     } catch (error) {
       console.error(`[OverlayServer] Failed to parse message from ${client.id}:`, error);
@@ -245,7 +302,6 @@ export class OverlayServer extends EventEmitter {
     }
 
     if (sentCount > 0) {
-      console.log(`[OverlayServer] Broadcasting ${message.type} to ${sentCount} client(s)`);
       this.emit('broadcast', { messageType: message.type, sentCount, failedCount });
     }
   }

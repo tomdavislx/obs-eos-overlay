@@ -12,8 +12,6 @@
 
   "cueList": 1,
 
-  "useEosConsoleAPI": true,
-
   "sync": {
     "syncOnConnect": true,
     "syncInterval": 300000,

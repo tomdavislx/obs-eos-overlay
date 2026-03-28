@@ -29,6 +29,8 @@ export class EosConnection extends EventEmitter {
   };
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private cleanedUp: boolean = false;
+  /** Host we are currently connected to (from config.hosts). */
+  private activeHost: string | null = null;
 
   constructor(config: EosConnectionConfig) {
     super();
@@ -52,54 +54,58 @@ export class EosConnection extends EventEmitter {
     }
 
     this.setState(EosConnectionState.CONNECTING);
+    this.disposeConsoleInstance();
 
-    try {
-      // Create eos-console instance with logging (only warnings and errors)
-      this.console = new EosConsoleClass({
-        host: this.config.host,
-        port: this.config.port,
-        logging: (level: string, message: string) => {
-          // Only log warnings and errors to reduce noise
-          if (level === 'warn' || level === 'error') {
-            console.log(`[eos-console:${level}] ${message}`);
-          }
-        },
-      });
+    const hosts = this.config.hosts;
+    let lastError: unknown = null;
 
-      // Set up event listeners
-      this.setupEventListeners();
+    for (let i = 0; i < hosts.length; i++) {
+      const host = hosts[i];
+      console.log(
+        `[EosConnection] Trying console ${i + 1}/${hosts.length}: ${host}:${this.config.port}...`
+      );
 
-      // Attempt connection
-      await this.console.connect();
-
-      // Connection successful (eos-console automatically receives all OSC messages)
-      this.setState(EosConnectionState.CONNECTED);
-      this.reconnectionState.attemptNumber = 0;
-      this.reconnectionState.lastError = null;
-
-      this.emit(EosConnectionEvent.CONNECTED);
-
-      // Try to get console version for logging
       try {
-        const version = await this.getVersion();
-        console.log(`[EosConnection] Connected to Eos console v${version.version} at ${this.config.host}:${this.config.port}`);
-      } catch (err) {
-        console.log(`[EosConnection] Connected to Eos console at ${this.config.host}:${this.config.port}`);
+        await this.tryConnectToHost(host);
+        this.activeHost = host;
+        this.setState(EosConnectionState.CONNECTED);
+        this.reconnectionState.attemptNumber = 0;
+        this.reconnectionState.lastError = null;
+
+        this.emit(EosConnectionEvent.CONNECTED);
+
+        try {
+          const version = await this.getVersion();
+          console.log(
+            `[EosConnection] Connected to Eos console v${version.version} at ${host}:${this.config.port}`
+          );
+        } catch {
+          console.log(`[EosConnection] Connected to Eos console at ${host}:${this.config.port}`);
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+        console.warn(
+          `[EosConnection] Unreachable: ${host}:${this.config.port} — ${(error as Error)?.message ?? error}`
+        );
+        this.disposeConsoleInstance();
       }
+    }
 
-    } catch (error) {
-      const connectionError = this.createConnectionError(error);
-      this.setState(EosConnectionState.ERROR);
-      this.reconnectionState.lastError = connectionError;
+    this.activeHost = null;
+    const connectionError = this.createConnectionError(
+      lastError ?? new Error('All console hosts failed'),
+      hosts
+    );
+    this.setState(EosConnectionState.ERROR);
+    this.reconnectionState.lastError = connectionError;
 
-      this.emit(EosConnectionEvent.ERROR, connectionError);
+    this.emit(EosConnectionEvent.ERROR, connectionError);
 
-      // Attempt reconnection if configured
-      if (this.shouldReconnect()) {
-        this.scheduleReconnect();
-      } else {
-        throw error;
-      }
+    if (this.shouldReconnect()) {
+      this.scheduleReconnect();
+    } else {
+      throw lastError ?? new Error('All console hosts failed');
     }
   }
 
@@ -112,13 +118,8 @@ export class EosConnection extends EventEmitter {
       this.reconnectTimeout = null;
     }
 
-    if (this.console) {
-      try {
-        this.console.disconnect();
-      } catch (err) {
-        console.error('[EosConnection] Error during disconnect:', err);
-      }
-    }
+    this.disposeConsoleInstance();
+    this.activeHost = null;
 
     this.setState(EosConnectionState.DISCONNECTED);
     this.emit(EosConnectionEvent.DISCONNECTED);
@@ -243,6 +244,39 @@ export class EosConnection extends EventEmitter {
   }
 
   // ===== PRIVATE METHODS =====
+
+  private disposeConsoleInstance(): void {
+    if (!this.console) {
+      return;
+    }
+    try {
+      if (typeof this.console.removeAllListeners === 'function') {
+        this.console.removeAllListeners();
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      this.console.disconnect();
+    } catch {
+      // ignore
+    }
+    this.console = null;
+  }
+
+  private async tryConnectToHost(host: string): Promise<void> {
+    this.console = new EosConsoleClass({
+      host,
+      port: this.config.port,
+      logging: (level: string, message: string) => {
+        if (level === 'warn' || level === 'error') {
+          console.log(`[eos-console:${level}] ${message}`);
+        }
+      },
+    });
+    this.setupEventListeners();
+    await this.console.connect();
+  }
 
   /**
    * Set up event listeners on eos-console instance
@@ -392,33 +426,41 @@ export class EosConnection extends EventEmitter {
   /**
    * Create connection error object
    */
-  private createConnectionError(error: any): EosConnectionError {
-    const code = error.code || error.name || 'UNKNOWN';
-    let message = error.message || 'Unknown connection error';
+  private createConnectionError(error: any, triedHosts?: string[]): EosConnectionError {
+    const code = error?.code || error?.name || 'UNKNOWN';
+    const refHost =
+      triedHosts?.[triedHosts.length - 1] ??
+      this.activeHost ??
+      this.config.hosts[0] ??
+      'unknown';
+    let message = error?.message || 'Unknown connection error';
     let recoverable = true;
 
-    // Determine if error is recoverable
-    switch (code) {
-      case 'ECONNREFUSED':
-        message = `Connection refused by console at ${this.config.host}:${this.config.port}. Ensure console is powered on and "Third Party OSC" is enabled.`;
-        recoverable = true;
-        break;
+    if (triedHosts && triedHosts.length > 1) {
+      message = `Could not connect to any of [${triedHosts.join(', ')}]. Last error: ${error?.message ?? 'unknown'}`;
+    } else {
+      switch (code) {
+        case 'ECONNREFUSED':
+          message = `Connection refused at ${refHost}:${this.config.port}. Ensure console is on and "Third Party OSC" is enabled.`;
+          recoverable = true;
+          break;
 
-      case 'ETIMEDOUT':
-      case 'TIMEOUT':
-        message = `Connection timeout to ${this.config.host}:${this.config.port}. Check network connectivity and firewall settings.`;
-        recoverable = true;
-        break;
+        case 'ETIMEDOUT':
+        case 'TIMEOUT':
+          message = `Connection timeout to ${refHost}:${this.config.port}. Check network and firewall.`;
+          recoverable = true;
+          break;
 
-      case 'EHOSTUNREACH':
-        message = `Host unreachable at ${this.config.host}. Verify IP address and network connection.`;
-        recoverable = true;
-        break;
+        case 'EHOSTUNREACH':
+          message = `Host unreachable: ${refHost}. Verify IP and network.`;
+          recoverable = true;
+          break;
 
-      case 'ENOTFOUND':
-        message = `Host not found: ${this.config.host}. Check hostname/IP address.`;
-        recoverable = false;
-        break;
+        case 'ENOTFOUND':
+          message = `Host not found: ${refHost}. Check hostname/IP.`;
+          recoverable = false;
+          break;
+      }
     }
 
     return {

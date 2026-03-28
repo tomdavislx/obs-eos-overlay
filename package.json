@@ -23,6 +23,7 @@
   "type": "commonjs",
   "dependencies": {
     "eos-console": "^0.3.1",
+    "obs-websocket-js": "^5.0.8",
     "osc": "^2.4.5",
     "ws": "^8.18.3",
     "xstate": "^5.21.0"

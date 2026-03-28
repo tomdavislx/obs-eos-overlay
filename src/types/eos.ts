@@ -7,7 +7,11 @@
  * Eos console connection configuration
  */
 export interface EosConnectionConfig {
-  host: string;                       // Console IP address (e.g., '10.101.100.101')
+  /**
+   * Console addresses to try in order (IPs or hostnames).
+   * First reachable console wins; reconnect attempts cycle through the list again.
+   */
+  hosts: string[];
   port: number;                       // Port for OSC + API (default: 3037)
   connectionTimeout: number;          // Connection timeout in ms
   reconnectMaxAttempts: number;       // Max reconnection attempts (0 = infinite)

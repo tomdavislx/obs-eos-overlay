@@ -23,11 +23,13 @@ import {
   isPreviousCueMessage,
   isFireEventMessage,
 } from './lib/oscParser';
+import { ObsControlClient } from './lib/obsControlClient';
+import { recordingActionForCue } from './lib/obsRecordingTriggers';
 
 export class EosOverlayBridge extends EventEmitter {
   private config: Config;
-  private connection: EosConnection | null;
-  private dataSync: CueDataSync | null;
+  private connection: EosConnection;
+  private dataSync: CueDataSync;
   private cueManager: CueStateManager;
   private overlayServer: OverlayServer;
   private running: boolean = false;
@@ -35,6 +37,11 @@ export class EosOverlayBridge extends EventEmitter {
   private bufferedActiveCueEvents: Array<{ cueList: number; cueNumber: number }> = [];
   private currentConnectionStatus: string = 'connecting';
   private currentConnectionMessage: string = '';
+  private obsControlClient: ObsControlClient | null = null;
+  private recordStartTimer: ReturnType<typeof setTimeout> | null = null;
+  private recordStopTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When false, active-cue-driven OBS triggers are ignored (connection/sync bootstrap). OSC fire still triggers. */
+  private obsRecordingTriggersArmed = false;
 
   constructor(config: Config) {
     super();
@@ -51,16 +58,18 @@ export class EosOverlayBridge extends EventEmitter {
       pingInterval: config.websocket.pingInterval,
     });
 
-    // Initialize optional Eos Console API components
-    if (config.useEosConsoleAPI) {
-      console.log('[EosOverlayBridge] Eos Console API enabled - will provide accurate fade times');
-      this.connection = new EosConnection(config.eos);
-      this.dataSync = new CueDataSync(this.connection, config.sync);
-      this.cueManager.setDataSync(this.dataSync);
-    } else {
-      console.log('[EosOverlayBridge] Eos Console API disabled - running in OSC-only mode');
-      this.connection = null;
-      this.dataSync = null;
+    // Eos Console API is mandatory in this application
+    this.connection = new EosConnection(config.eos);
+    this.dataSync = new CueDataSync(this.connection, config.sync);
+    this.cueManager.setDataSync(this.dataSync);
+
+    if (config.obsControl.enabled) {
+      this.obsControlClient = new ObsControlClient({
+        host: config.obsControl.host,
+        port: config.obsControl.port,
+        password: config.obsControl.password,
+      });
+      console.log('[EosOverlayBridge] OBS WebSocket recording control enabled');
     }
 
     // Set up event handlers
@@ -80,19 +89,16 @@ export class EosOverlayBridge extends EventEmitter {
     // Start WebSocket server
     this.overlayServer.start();
 
-    // Start connection attempt if Eos Console API is enabled
-    if (this.connection) {
-      // Start connection attempt (don't await - let it connect in background)
-      // Connection success/failure will be handled by event handlers
-      this.connection.connect().catch((error) => {
-        // Error is logged by connection class, will trigger reconnection
-        console.log('[EosOverlayBridge] Initial connection attempt failed, will retry automatically');
-      });
-    } else {
-      console.log('[EosOverlayBridge] Eos Console API disabled - waiting for OSC messages only');
-      // Broadcast that we're "connected" in OSC-only mode
-      this.broadcastConnectionStatus('connected', 'OSC-only mode');
+    if (this.obsControlClient) {
+      void this.obsControlClient.warmUpConnection();
     }
+
+    // Start connection attempt (don't await - let it connect in background)
+    // Connection success/failure will be handled by event handlers
+    this.connection.connect().catch(() => {
+      // Error is logged by connection class, will trigger reconnection
+      console.log('[EosOverlayBridge] Initial connection attempt failed, will retry automatically');
+    });
 
     this.running = true;
 
@@ -114,11 +120,12 @@ export class EosOverlayBridge extends EventEmitter {
     this.broadcastConnectionStatus('disconnected', 'Server stopped');
 
     // Stop components
-    if (this.connection) {
-      this.connection.disconnect();
-    }
-    if (this.dataSync) {
-      this.dataSync.cleanup();
+    this.connection.disconnect();
+    this.dataSync.cleanup();
+    this.clearObsRecordingTimers();
+    if (this.obsControlClient) {
+      this.obsControlClient.disconnect();
+      this.obsControlClient = null;
     }
     this.cueManager.cleanup();
     this.overlayServer.stop();
@@ -142,11 +149,11 @@ export class EosOverlayBridge extends EventEmitter {
   getStatus(): any {
     return {
       running: this.running,
-      connection: this.connection ? {
+      connection: {
         state: this.connection.getState(),
         reconnection: this.connection.getReconnectionState(),
-      } : { state: 'OSC_ONLY', reconnection: null },
-      sync: this.dataSync ? this.dataSync.getSyncStatus() : null,
+      },
+      sync: this.dataSync.getSyncStatus(),
       cues: {
         active: this.cueManager.getActiveCues().length,
         total: this.cueManager.getAllCues().length,
@@ -160,47 +167,117 @@ export class EosOverlayBridge extends EventEmitter {
 
   // ===== PRIVATE METHODS =====
 
+  private clearObsRecordingTimers(): void {
+    if (this.recordStartTimer !== null) {
+      clearTimeout(this.recordStartTimer);
+      this.recordStartTimer = null;
+    }
+    if (this.recordStopTimer !== null) {
+      clearTimeout(this.recordStopTimer);
+      this.recordStopTimer = null;
+    }
+  }
+
+  /**
+   * After a record start/stop trigger cue fires, optionally delay before calling OBS.
+   * Scheduling a start cancels a pending delayed stop; scheduling a stop cancels a pending delayed start.
+   */
+  private scheduleObsRecording(action: 'start' | 'stop', cueRef: string): void {
+    if (!this.obsControlClient) {
+      return;
+    }
+
+    const delayMs =
+      action === 'start'
+        ? this.config.obsControl.recordStartDelayMs
+        : this.config.obsControl.recordStopDelayMs;
+
+    if (action === 'start') {
+      if (this.recordStopTimer !== null) {
+        clearTimeout(this.recordStopTimer);
+        this.recordStopTimer = null;
+      }
+      if (this.recordStartTimer !== null) {
+        clearTimeout(this.recordStartTimer);
+        this.recordStartTimer = null;
+      }
+      const client = this.obsControlClient;
+      const run = (): void => {
+        this.recordStartTimer = null;
+        console.log(`[EosOverlayBridge] Starting OBS recording (cue ${cueRef})`);
+        void client.startRecording();
+      };
+      if (delayMs <= 0) {
+        run();
+      } else {
+        console.log(
+          `[EosOverlayBridge] Scheduling OBS StartRecord in ${delayMs}ms (cue ${cueRef})`
+        );
+        this.recordStartTimer = setTimeout(run, delayMs);
+      }
+    } else {
+      if (this.recordStartTimer !== null) {
+        clearTimeout(this.recordStartTimer);
+        this.recordStartTimer = null;
+      }
+      if (this.recordStopTimer !== null) {
+        clearTimeout(this.recordStopTimer);
+        this.recordStopTimer = null;
+      }
+      const client = this.obsControlClient;
+      const run = (): void => {
+        this.recordStopTimer = null;
+        console.log(`[EosOverlayBridge] Stopping OBS recording (cue ${cueRef})`);
+        void client.stopRecording();
+      };
+      if (delayMs <= 0) {
+        run();
+      } else {
+        console.log(
+          `[EosOverlayBridge] Scheduling OBS StopRecord in ${delayMs}ms (cue ${cueRef})`
+        );
+        this.recordStopTimer = setTimeout(run, delayMs);
+      }
+    }
+  }
+
   /**
    * Set up event handlers
    */
   private setupEventHandlers(): void {
-    // Connection events (only if Eos Console API is enabled)
-    if (this.connection) {
-      this.connection.on(EosConnectionEvent.CONNECTED, () => {
-        this.handleConnected();
-      });
+    // Connection events
+    this.connection.on(EosConnectionEvent.CONNECTED, () => {
+      this.handleConnected();
+    });
 
-      this.connection.on(EosConnectionEvent.DISCONNECTED, () => {
-        this.handleDisconnected();
-      });
+    this.connection.on(EosConnectionEvent.DISCONNECTED, () => {
+      this.handleDisconnected();
+    });
 
-      this.connection.on(EosConnectionEvent.OSC_MESSAGE, (message: EosOSCMessage) => {
-        this.handleOSCMessage(message);
-      });
+    this.connection.on(EosConnectionEvent.OSC_MESSAGE, (message: EosOSCMessage) => {
+      this.handleOSCMessage(message);
+    });
 
-      this.connection.on('active-cue-change', (data: { cueList: number; cueNumber: number }) => {
-        this.handleActiveCueChange(data);
-      });
+    this.connection.on('active-cue-change', (data: { cueList: number; cueNumber: number }) => {
+      this.handleActiveCueChange(data);
+    });
 
-      this.connection.on('previous-cue-change', (data: { cueList: number; cueNumber: number }) => {
-        this.handlePreviousCueChange(data);
-      });
+    this.connection.on('previous-cue-change', (data: { cueList: number; cueNumber: number }) => {
+      this.handlePreviousCueChange(data);
+    });
 
-      this.connection.on(EosConnectionEvent.ERROR, (error: any) => {
-        this.handleConnectionError(error);
-      });
-    }
+    this.connection.on(EosConnectionEvent.ERROR, (error: any) => {
+      this.handleConnectionError(error);
+    });
 
-    // Data sync events (only if enabled)
-    if (this.dataSync) {
-      this.dataSync.on('sync-complete', (data: any) => {
-        this.handleSyncComplete();
-      });
+    // Data sync events
+    this.dataSync.on('sync-complete', () => {
+      this.handleSyncComplete();
+    });
 
-      this.dataSync.on('sync-error', (error: any) => {
-        console.error('[EosOverlayBridge] Sync error:', error);
-      });
-    }
+    this.dataSync.on('sync-error', (error: any) => {
+      console.error('[EosOverlayBridge] Sync error:', error);
+    });
 
     // Cue manager events
     this.cueManager.on('cue-fired', () => {
@@ -242,8 +319,10 @@ export class EosOverlayBridge extends EventEmitter {
     console.log('[EosOverlayBridge] Eos console connected');
     this.emit('console-connected');
 
-    // Initialize data sync after connection is established (if enabled)
-    if (this.dataSync) {
+    this.obsRecordingTriggersArmed = false;
+
+    try {
+      // Initialize data sync after connection is established
       try {
         this.broadcastConnectionStatus('syncing', 'Loading cue data...');
         await this.dataSync.initialize(this.config.cueList);
@@ -253,8 +332,8 @@ export class EosOverlayBridge extends EventEmitter {
         console.error('[EosOverlayBridge] Failed to initialize data sync:', error);
         this.broadcastConnectionStatus('connected', 'Connected (sync failed)');
       }
-    } else {
-      this.broadcastConnectionStatus('connected', 'Ready');
+    } finally {
+      this.obsRecordingTriggersArmed = true;
     }
   }
 
@@ -263,6 +342,7 @@ export class EosOverlayBridge extends EventEmitter {
    */
   private handleDisconnected(): void {
     console.warn('[EosOverlayBridge] Eos console disconnected');
+    this.obsRecordingTriggersArmed = false;
     this.broadcastConnectionStatus('reconnecting', 'Connection lost, retrying...');
     this.emit('console-disconnected');
   }
@@ -282,10 +362,10 @@ export class EosOverlayBridge extends EventEmitter {
   private async handleSyncComplete(): Promise<void> {
     this.initialSyncComplete = true;
 
-    // Process any buffered events
+    // Process any buffered events (not operator GOs — skip OBS; same cue as idle state would false-trigger)
     if (this.bufferedActiveCueEvents.length > 0) {
       for (const event of this.bufferedActiveCueEvents) {
-        await this.processActiveCueChange(event);
+        await this.processActiveCueChange(event, { skipObsRecording: true });
       }
       this.bufferedActiveCueEvents = [];
     }
@@ -298,7 +378,7 @@ export class EosOverlayBridge extends EventEmitter {
       const activeCue = this.connection.getActiveCueNumber();
       if (activeCue && activeCue.cueList === this.config.cueList) {
         console.log(`[EosOverlayBridge] Seeding active cue from console state: ${activeCue.cueList}/${activeCue.cueNumber}`);
-        await this.processActiveCueChange(activeCue);
+        await this.processActiveCueChange(activeCue, { skipObsRecording: true });
       }
     }
   }
@@ -322,9 +402,42 @@ export class EosOverlayBridge extends EventEmitter {
   }
 
   /**
+   * Match fired / active cue number against OBS recording trigger lists.
+   * Uses eos-console active-cue events as well as OSC fire (some consoles omit fire on Third Party OSC).
+   */
+  private maybeTriggerObsRecordingForCueNumber(cueNumber: string): void {
+    if (!this.obsControlClient) {
+      return;
+    }
+    const action = recordingActionForCue(
+      cueNumber,
+      this.config.obsControl.recordStartCueNumbers,
+      this.config.obsControl.recordStopCueNumbers
+    );
+    const cueRef = `${this.config.cueList}/${cueNumber.trim()}`;
+    if (action === 'start') {
+      console.log(
+        `[EosOverlayBridge] OBS recording: cue ${cueRef} matched start list [${this.config.obsControl.recordStartCueNumbers.join(', ')}]`
+      );
+      this.scheduleObsRecording('start', cueRef);
+    } else if (action === 'stop') {
+      console.log(
+        `[EosOverlayBridge] OBS recording: cue ${cueRef} matched stop list [${this.config.obsControl.recordStopCueNumbers.join(', ')}]`
+      );
+      this.scheduleObsRecording('stop', cueRef);
+    }
+  }
+
+  /**
    * Process active cue change (after sync is complete)
    */
-  private async processActiveCueChange(data: { cueList: number; cueNumber: number }): Promise<void> {
+  private async processActiveCueChange(
+    data: { cueList: number; cueNumber: number },
+    options?: { skipObsRecording?: boolean }
+  ): Promise<void> {
+    if (!options?.skipObsRecording && this.obsRecordingTriggersArmed) {
+      this.maybeTriggerObsRecordingForCueNumber(String(data.cueNumber));
+    }
 
     // Look up cue data from cache
     if (this.dataSync) {
@@ -431,6 +544,27 @@ export class EosOverlayBridge extends EventEmitter {
     }
 
     this.cueManager.handleFire(parsed.cueList, parsed.cueNumber, Date.now());
+
+    this.maybeTriggerObsRecordingForCueNumber(parsed.cueNumber);
+    this.maybeCreateObsRecordChapterMarker(parsed.cueNumber);
+  }
+
+  private maybeCreateObsRecordChapterMarker(cueNumber: string): void {
+    if (!this.obsControlClient) {
+      return;
+    }
+    const n = cueNumber.trim();
+    const marker = this.config.obsControl.recordChapterMarkers.find(
+      (m) => m.cueNumber === n
+    );
+    if (!marker) {
+      return;
+    }
+    const cueRef = `${this.config.cueList}/${n}`;
+    console.log(
+      `[EosOverlayBridge] OBS chapter marker: cue ${cueRef} → "${marker.label}"`
+    );
+    void this.obsControlClient.createRecordChapter(marker.label);
   }
 
   /**
