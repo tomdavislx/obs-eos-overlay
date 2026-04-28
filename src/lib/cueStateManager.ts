@@ -62,6 +62,8 @@ export class CueStateManager extends EventEmitter {
           this.transitionToState(existingCue, CueState.BACKGROUND, 'Another cue fired');
           // Schedule cleanup based on estimated completion time
           this.scheduleBackgroundCleanup(existingCue);
+          // Clear active-cue stale timer so it cannot fire while this cue is BACKGROUND
+          this.resetStaleTimer(existingCue);
         }
         // Cleanup FINISHED cues (old main cue that has completed)
         else if (existingCue.state === CueState.FINISHED) {
@@ -77,6 +79,9 @@ export class CueStateManager extends EventEmitter {
       // Create new cue
       cue = this.createCue(cueId, cueList, cueNumber, CueSource.FIRE);
     }
+
+    // Drop BACKGROUND completion scheduling — this cue is main again
+    this.clearCompletionTimer(cue.cueId);
 
     // Transition to ACTIVE
     if (!this.transitionToState(cue, CueState.ACTIVE, 'Cue fired')) {
@@ -136,11 +141,24 @@ export class CueStateManager extends EventEmitter {
       this.addProgressEntry(cue, percentage);
     }
 
-    // Always transition DISCOVERED → ACTIVE when we receive any active-cue
-    // update, even without a percentage. The cue is the active cue on the
-    // desk and must appear in the overlay. Stale/finish logic handles cleanup.
-    if (cue.state === CueState.DISCOVERED || cue.state === CueState.STALE) {
+    // Promote to ACTIVE when desk reports this cue as active (including
+    // BACKGROUND → ACTIVE when the same cue is live again without a prior FIRE in OSC).
+    if (
+      cue.state === CueState.DISCOVERED ||
+      cue.state === CueState.STALE ||
+      cue.state === CueState.BACKGROUND
+    ) {
+      this.clearCompletionTimer(cue.cueId);
       this.transitionToState(cue, CueState.ACTIVE, 'Received active update');
+
+      // Only one main cue: demote any other ACTIVE (same as handleFire)
+      for (const [existingCueId, existingCue] of this.cues.entries()) {
+        if (existingCueId !== cue.cueId && existingCue.state === CueState.ACTIVE) {
+          this.transitionToState(existingCue, CueState.BACKGROUND, 'Another cue is active');
+          this.scheduleBackgroundCleanup(existingCue);
+          this.resetStaleTimer(existingCue);
+        }
+      }
 
       // Always set the stale timer on this transition so there is a guaranteed
       // cleanup path even when no percentage arrives (e.g. seeding from console
@@ -245,10 +263,25 @@ export class CueStateManager extends EventEmitter {
         cue.state === CueState.FINISHED ||
         cue.state === CueState.STALE
       ) {
-        // Add computed properties for overlay
-        cue.isRunning = cue.state === CueState.ACTIVE || cue.state === CueState.COMPLETING;
+        // Overlay "running" = fade in progress (green), not only ACTIVE/COMPLETING
+        const pctRaw = cue.percentage;
+        let pctVal: number | null = null;
+        if (pctRaw != null && typeof pctRaw === 'string') {
+          const parsed = parseInt(pctRaw.replace('%', ''), 10);
+          pctVal = Number.isNaN(parsed) ? null : parsed;
+        }
+        const inProgress = pctVal === null || pctVal < 100;
+        const isStaleState = cue.state === CueState.STALE;
+
+        cue.isRunning =
+          !isStaleState &&
+          (cue.state === CueState.ACTIVE ||
+            cue.state === CueState.COMPLETING ||
+            (cue.state === CueState.DISCOVERED && inProgress) ||
+            (cue.state === CueState.BACKGROUND && inProgress && pctVal !== null));
+
         cue.isBackgroundRunning = cue.state === CueState.BACKGROUND;
-        cue.isStale = cue.state === CueState.STALE;
+        cue.isStale = isStaleState;
 
         activeCues.push(cue);
       }
@@ -481,6 +514,16 @@ export class CueStateManager extends EventEmitter {
   /**
    * Reset stale timer for cue
    */
+  /**
+   * Cancel background completion timeout (e.g. cue (re)fired to main)
+   */
+  private clearCompletionTimer(cueId: string): void {
+    const timers = this.cueTimers.get(cueId);
+    if (!timers?.completionTimer) return;
+    clearTimeout(timers.completionTimer);
+    timers.completionTimer = null;
+  }
+
   private resetStaleTimer(cue: CueData): void {
     const timers = this.cueTimers.get(cue.cueId);
     if (!timers) return;
@@ -505,12 +548,16 @@ export class CueStateManager extends EventEmitter {
    * Handle stale timeout
    */
   private handleStaleTimeout(cue: CueData): void {
-    // Only mark as stale if in active states
+    // BACKGROUND cues use completion timers only; stale must never apply here
+    if (cue.state === CueState.BACKGROUND) {
+      return;
+    }
+
+    // Only mark as stale if in active foreground states
     if (
       cue.state === CueState.DISCOVERED ||
       cue.state === CueState.ACTIVE ||
-      cue.state === CueState.COMPLETING ||
-      cue.state === CueState.BACKGROUND
+      cue.state === CueState.COMPLETING
     ) {
       // If the cue never made progress (percentage was static the whole time),
       // it was likely already completed when we first connected. Treat it as

@@ -25,7 +25,7 @@ export const VALID_TRANSITIONS: Record<CueState, CueState[]> = {
   [CueState.DISCOVERED]: [CueState.ACTIVE, CueState.ERROR, CueState.STALE, CueState.FINISHED],
   [CueState.ACTIVE]: [CueState.COMPLETING, CueState.BACKGROUND, CueState.TERMINATED, CueState.STALE, CueState.FINISHED],
   [CueState.COMPLETING]: [CueState.FINISHED, CueState.BACKGROUND, CueState.TERMINATED, CueState.STALE],
-  [CueState.BACKGROUND]: [CueState.FINISHED, CueState.TERMINATED, CueState.STALE],
+  [CueState.BACKGROUND]: [CueState.ACTIVE, CueState.FINISHED, CueState.TERMINATED, CueState.STALE],
   [CueState.FINISHED]: [CueState.ACTIVE], // Can be reactivated by FIRE events
   [CueState.TERMINATED]: [], // Terminal state - gets cleaned up directly
   [CueState.STALE]: [CueState.ACTIVE, CueState.ERROR, CueState.FINISHED],
