@@ -272,10 +272,48 @@ export class CueDataSync extends EventEmitter {
       mark: cue.mark || false,
       block: cue.block || false,
       scene: cue.scene || null,
+      sceneEnd: cue.sceneEnd || false,
       notes: cue.notes || null,
       cachedAt: Date.now(),
       fetchedFrom: source,
     };
+  }
+
+  /**
+   * Resolve effective scene for a cue by walking scene markers in cue order.
+   * Scene markers apply to a range until a sceneEnd cue (inclusive) clears it.
+   */
+  getSceneForCue(cueId: string): string | null {
+    const parsed = this.parseCueId(cueId);
+    if (!parsed) return null;
+
+    const targetCueNumber = parsed.cueNumber;
+    const entries = Array.from(this.cache.values())
+      .filter((entry) => this.isCacheValid(entry) && entry.cueList === parsed.cueList)
+      .sort((a, b) => a.cueNumber - b.cueNumber);
+
+    let activeScene: string | null = null;
+
+    for (const entry of entries) {
+      if (entry.cueNumber > targetCueNumber) {
+        break;
+      }
+
+      if (entry.scene && entry.scene.trim().length > 0) {
+        activeScene = entry.scene.trim();
+      }
+
+      // sceneEnd applies after this cue, so this cue still belongs to activeScene.
+      if (entry.cueNumber === targetCueNumber) {
+        return activeScene;
+      }
+
+      if (entry.sceneEnd) {
+        activeScene = null;
+      }
+    }
+
+    return activeScene;
   }
 
   /**

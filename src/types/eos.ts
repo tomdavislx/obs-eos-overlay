@@ -57,6 +57,7 @@ export interface EosConsoleCue {
 
   // Advanced properties
   scene?: string;                     // Scene text
+  sceneEnd?: boolean;                 // Marks end of the active scene range
   notes?: string;                     // Cue notes
   partCount?: number;                 // Number of parts
 
@@ -87,6 +88,7 @@ export interface CueCacheEntry {
   mark: boolean;
   block: boolean;
   scene: string | null;
+  sceneEnd: boolean;
   notes: string | null;
 
   // Cache metadata

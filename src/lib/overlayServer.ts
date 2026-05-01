@@ -28,12 +28,16 @@ export class OverlayServer extends EventEmitter {
   private pingTimer: NodeJS.Timeout | null = null;
   private nextClientId: number = 1;
   private readonly overlayHtmlPath: string;
+  private readonly stylesCssPath: string;
+  private readonly isDevMode: boolean;
 
   constructor(config: { port: number; pingInterval: number }) {
     super();
     this.port = config.port;
     this.pingInterval = config.pingInterval;
     this.overlayHtmlPath = path.join(__dirname, '..', '..', 'overlay.html');
+    this.stylesCssPath = path.join(__dirname, '..', '..', 'styles.css');
+    this.isDevMode = process.env.NODE_ENV !== 'production';
   }
 
   /**
@@ -46,22 +50,31 @@ export class OverlayServer extends EventEmitter {
 
     console.log(`[OverlayServer] Starting HTTP + WebSocket on port ${this.port}...`);
 
-    let overlayBody: string;
-    try {
-      overlayBody = fs.readFileSync(this.overlayHtmlPath, 'utf8');
-    } catch (e) {
-      console.error('[OverlayServer] Could not read overlay.html at', this.overlayHtmlPath, e);
-      throw e;
+    let overlayBody: string | null = null;
+    let stylesBody: string | null = null;
+    if (!this.isDevMode) {
+      overlayBody = this.readOverlayHtml();
+      stylesBody = this.readStylesCss();
     }
 
     this.httpServer = http.createServer((req, res) => {
       const rawUrl = req.url?.split('?')[0] || '/';
       if (req.method === 'GET' && (rawUrl === '/' || rawUrl === '/overlay.html')) {
+        const html = this.isDevMode ? this.readOverlayHtml() : overlayBody;
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
         });
-        res.end(overlayBody);
+        res.end(html);
+        return;
+      }
+      if (req.method === 'GET' && rawUrl === '/styles.css') {
+        const css = this.isDevMode ? this.readStylesCss() : stylesBody;
+        res.writeHead(200, {
+          'Content-Type': 'text/css; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
+        res.end(css);
         return;
       }
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -351,6 +364,28 @@ export class OverlayServer extends EventEmitter {
         this.clients.delete(clientId);
         console.log(`[OverlayServer] Removed stale client: ${clientId}`);
       }
+    }
+  }
+
+  /**
+   * Read overlay HTML from disk.
+   * In dev mode we call this per request so style edits appear immediately.
+   */
+  private readOverlayHtml(): string {
+    try {
+      return fs.readFileSync(this.overlayHtmlPath, 'utf8');
+    } catch (e) {
+      console.error('[OverlayServer] Could not read overlay.html at', this.overlayHtmlPath, e);
+      throw e;
+    }
+  }
+
+  private readStylesCss(): string {
+    try {
+      return fs.readFileSync(this.stylesCssPath, 'utf8');
+    } catch (e) {
+      console.error('[OverlayServer] Could not read styles.css at', this.stylesCssPath, e);
+      throw e;
     }
   }
 }

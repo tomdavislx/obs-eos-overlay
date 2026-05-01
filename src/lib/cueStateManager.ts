@@ -403,6 +403,7 @@ export class CueStateManager extends EventEmitter {
       cueList,
       cueNumber,
       label: '',
+      scene: null,
       time: null,
       percentage: null,
       state: CueState.DISCOVERED,
@@ -487,7 +488,7 @@ export class CueStateManager extends EventEmitter {
   /**
    * Enrich cue data from console cache
    */
-  private async enrichCueData(cue: CueData): Promise<void> {
+  private enrichCueData(cue: CueData): void {
     if (!this.dataSync) return;
 
     try {
@@ -500,10 +501,21 @@ export class CueStateManager extends EventEmitter {
           cue.label = cached.label;
         }
 
+        // Scene metadata is cue-level context used by the overlay.
+        if (cached.scene) {
+          cue.scene = cached.scene;
+        }
+
         // Update estimated completion time with accurate fade time
         if (cached.fadeTimeMs) {
           cue.estimatedCompletionTime = cached.fadeTimeMs;
         }
+      }
+
+      // Resolve scene ranges (scene markers apply across multiple cues).
+      const resolvedScene = this.dataSync.getSceneForCue(cue.cueId);
+      if (resolvedScene) {
+        cue.scene = resolvedScene;
       }
       // If not in cache, don't try to fetch - sync will populate cache soon
     } catch (error) {

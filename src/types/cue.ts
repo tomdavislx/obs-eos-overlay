@@ -71,6 +71,7 @@ export interface CueData {
   
   // Content
   label: string;                    // e.g., "Scene 9 - Interview"
+  scene?: string | null;            // Scene break/group from console cue metadata
   time: number | null;              // Duration in seconds
   percentage: string | null;        // Current progress, e.g., "73%"
   

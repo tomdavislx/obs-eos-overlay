@@ -3,175 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <title>Eos Cue Overlay</title>
-    <style>
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        margin: 0;
-        padding: 16px 20px;
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        background: transparent;
-        -webkit-font-smoothing: antialiased;
-      }
-
-      /* No filled “card” — reads cleaner on video; outline keeps text legible */
-      .overlay-root {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 4px;
-        max-width: min(88vw, 42rem);
-      }
-
-      .on-air-text {
-        -webkit-text-stroke: 0.04em rgba(0, 0, 0, 0.88);
-        paint-order: stroke fill;
-        text-shadow:
-          0 0 1px rgba(0, 0, 0, 1),
-          0 2px 4px rgba(0, 0, 0, 0.75);
-      }
-
-      #status {
-        font-size: 9px;
-        font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        opacity: 0.75;
-        transition: opacity 0.2s;
-      }
-
-      #status.status-connecting {
-        color: #ffe08a;
-      }
-
-      #status.status-syncing {
-        color: #a8ddff;
-      }
-
-      #status.status-connected {
-        opacity: 0;
-        pointer-events: none;
-      }
-
-      #status.status-reconnecting {
-        color: #ffcc80;
-      }
-
-      #status.status-disconnected {
-        color: #ffc9c9;
-      }
-
-      #main-cue {
-        font-size: clamp(1.35rem, 3.2vw, 2.125rem);
-        font-weight: 700;
-        line-height: 1.2;
-        letter-spacing: 0.01em;
-        padding: 2px 0 2px 12px;
-        margin: 2px 0 0;
-        border-left: 3px solid transparent;
-      }
-
-      #running-cues {
-        font-size: clamp(0.75rem, 1.5vw, 0.875rem);
-        line-height: 1.4;
-        font-weight: 600;
-        padding-left: 12px;
-        margin-top: 2px;
-        opacity: 0.95;
-      }
-
-      .cue-item {
-        margin-bottom: 3px;
-      }
-
-      .cue-item.on-air-text {
-        display: block;
-      }
-
-      .cue-flash {
-        color: #f4fff6 !important;
-        transition: none;
-      }
-
-      /* Running: obvious green fill; dark-green stroke (black stroke mutes green) */
-      #main-cue.cue-running,
-      .cue-item.cue-running {
-        color: #00ff66;
-        -webkit-text-stroke: 0.045em rgba(0, 45, 18, 0.95);
-        text-shadow:
-          0 0 2px rgba(0, 0, 0, 1),
-          0 2px 4px rgba(0, 0, 0, 0.85),
-          0 0 14px rgba(0, 255, 102, 0.45);
-      }
-
-      #main-cue.cue-running {
-        border-left-color: #00ff66;
-      }
-
-      #main-cue.cue-completed,
-      .cue-item.cue-completed {
-        color: #ffffff;
-        -webkit-text-stroke: 0.04em rgba(0, 0, 0, 0.88);
-        text-shadow:
-          0 0 1px rgba(0, 0, 0, 1),
-          0 2px 4px rgba(0, 0, 0, 0.75);
-      }
-
-      #main-cue.cue-completed {
-        border-left-color: rgba(255, 255, 255, 0.4);
-      }
-
-      #main-cue.cue-stale,
-      .cue-item.cue-stale {
-        color: #ffe8e8;
-        -webkit-text-stroke: 0.04em rgba(0, 0, 0, 0.88);
-        text-shadow:
-          0 0 1px rgba(0, 0, 0, 1),
-          0 2px 4px rgba(0, 0, 0, 0.75);
-      }
-
-      #main-cue.cue-stale {
-        border-left-color: rgba(255, 130, 130, 0.9);
-      }
-
-      /* 0s / snap cues: visible green pulse then settle to white */
-      @keyframes instantCuePulse {
-        0% {
-          color: #00ff66;
-          -webkit-text-stroke: 0.045em rgba(0, 45, 18, 0.95);
-        }
-        22% {
-          color: #ffffff;
-          -webkit-text-stroke: 0.04em rgba(0, 0, 0, 0.88);
-        }
-        44% {
-          color: #00ff66;
-          -webkit-text-stroke: 0.045em rgba(0, 45, 18, 0.95);
-        }
-        66% {
-          color: #ffffff;
-          -webkit-text-stroke: 0.04em rgba(0, 0, 0, 0.88);
-        }
-        88% {
-          color: #00ff66;
-          -webkit-text-stroke: 0.045em rgba(0, 45, 18, 0.95);
-        }
-        100% {
-          color: #ffffff;
-          -webkit-text-stroke: 0.04em rgba(0, 0, 0, 0.88);
-        }
-      }
-
-      #main-cue.cue-instant-pulse {
-        animation: instantCuePulse 0.55s ease-in-out 1 forwards;
-        text-shadow:
-          0 0 2px rgba(0, 0, 0, 1),
-          0 2px 4px rgba(0, 0, 0, 0.75),
-          0 0 14px rgba(0, 255, 102, 0.4);
-      }
-    </style>
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="overlay-root">
@@ -224,6 +56,20 @@
       let instantPulseCleanup = null;
       let lastCueState = {}; // Track last state of each cue (for detecting transitions)
 
+      function normalizeCueNumberKey(cueNumber) {
+        if (cueNumber == null) return "";
+        const n = Number(cueNumber);
+        if (Number.isFinite(n)) return String(n);
+        return String(cueNumber).trim();
+      }
+
+      function getCueStateKey(cue) {
+        if (!cue || typeof cue !== "object") return "";
+        const list = cue.cueList != null ? String(cue.cueList).trim() : "";
+        const numberKey = normalizeCueNumberKey(cue.cueNumber);
+        return `${list}/${numberKey}`;
+      }
+
       function parseCuePercent(percentage) {
         if (!percentage || typeof percentage !== "string") return NaN;
         const n = parseInt(percentage.replace("%", ""), 10);
@@ -253,6 +99,31 @@
           instantPulseCleanup();
           instantPulseCleanup = null;
         }
+      }
+
+      function sanitizeScene(scene) {
+        if (typeof scene !== "string") return "";
+        const trimmed = scene.trim();
+        return trimmed.length > 0 ? trimmed : "";
+      }
+
+      function renderCueLines(targetElement, cue, options = {}) {
+        if (!targetElement || !cue) return;
+        const { prefix = "", includeScene = true } = options;
+        targetElement.innerHTML = "";
+
+        const scene = includeScene ? sanitizeScene(cue.scene) : "";
+        if (scene) {
+          const sceneEl = document.createElement("div");
+          sceneEl.className = "cue-scene";
+          sceneEl.textContent = scene;
+          targetElement.appendChild(sceneEl);
+        }
+
+        const titleEl = document.createElement("div");
+        titleEl.className = "cue-title";
+        titleEl.textContent = `${prefix}${cue.cueNumber} - ${cue.label || ""}`.trim();
+        targetElement.appendChild(titleEl);
       }
 
       function playInstantCuePulse(cueId, onSettled) {
@@ -369,18 +240,18 @@
       }
 
       function updateMainCue(latestCue) {
-        mainCueElement.textContent = `LXQ: ${latestCue.cueNumber} - ${latestCue.label}`;
+        renderCueLines(mainCueElement, latestCue, { prefix: "LXQ: ", includeScene: true });
 
-        const isNewCue = lastFlashedCue !== latestCue.cueId;
-        const lastState = lastCueState[latestCue.cueId] || {};
+        const cueStateKey = getCueStateKey(latestCue) || latestCue.cueId;
+        const isNewCue = lastFlashedCue !== cueStateKey;
+        const lastState = lastCueState[cueStateKey] || {};
 
         const justCompletedInstantly =
           isInstantSnapCue(latestCue) &&
-          lastState.percentage != null &&
           lastState.percentage !== "100%" &&
           latestCue.percentage === "100%";
 
-        lastCueState[latestCue.cueId] = {
+        lastCueState[cueStateKey] = {
           percentage: latestCue.percentage,
           isRunning: latestCue.isRunning,
         };
@@ -389,12 +260,10 @@
 
         if (isNewCue) {
           clearInstantPulseTimers();
-          lastFlashedCue = latestCue.cueId;
+          lastFlashedCue = cueStateKey;
 
           if (latestCue.isStale) {
             mainCueElement.className = "on-air-text cue-stale";
-          } else if (isInstantSnapCue(latestCue)) {
-            playInstantCuePulse(latestCue.cueId);
           } else if (cueLooksRunning(latestCue)) {
             mainCueElement.className = "on-air-text cue-running";
           } else {
@@ -402,7 +271,7 @@
           }
         } else if (justCompletedInstantly) {
           clearInstantPulseTimers();
-          playInstantCuePulse(latestCue.cueId);
+          playInstantCuePulse(cueStateKey);
         } else if (!pulsePlaying) {
           if (latestCue.isStale) {
             mainCueElement.className = "on-air-text cue-stale";
@@ -441,7 +310,7 @@
           }
           
           // Update content and status
-          element.textContent = `${cue.cueNumber} - ${cue.label}`;
+          renderCueLines(element, cue, { prefix: "LXQ: ", includeScene: false });
           
           if (cue.isStale) {
             element.className = "cue-item on-air-text cue-stale";
