@@ -88,13 +88,20 @@ export class ObsControlClient {
   async createRecordChapter(chapterName: string): Promise<void> {
     try {
       await this.ensureConnected();
-      await this.obs.call('CreateRecordChapter', {
-        chapterName,
+      await this.obs.call('CallVendorRequest', {
+        vendorName: 'streamup-chapter-manager',
+        requestType: 'setChapterMarker',
+        requestData: {
+          chapterName,
+          chapterSource: 'EosOverlayBridge',
+        },
       });
-      console.log(`[ObsControlClient] CreateRecordChapter acknowledged by OBS (${chapterName})`);
+      console.log(
+        `[ObsControlClient] streamup-chapter-manager.setChapterMarker acknowledged by OBS (${chapterName})`
+      );
     } catch (err: any) {
       this.resetConnection();
-      console.warn('[ObsControlClient] CreateRecordChapter failed:', err?.message ?? err);
+      console.warn('[ObsControlClient] setChapterMarker failed:', err?.message ?? err);
     }
   }
 

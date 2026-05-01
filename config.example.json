@@ -1,39 +1,89 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "description": "Eos-to-OBS Overlay Bridge Configuration. OBS Browser Source URL: http://127.0.0.1:<websocket.port>/ (same as WEBSOCKET_PORT; do not use file:// overlay path in OBS).",
-  "comment": "Copy this file to 'config.json' and edit your settings",
+  "_description": "Eos-to-OBS Overlay Bridge configuration example. Copy to config.json and edit.",
+  "_obsUrlHint": "OBS Browser Source URL: http://127.0.0.1:<websocket.port>/ (do not use file://).",
 
   "eos": {
+    "_hosts_comment": "Console hostnames/IPs to try in order. Default: [\"localhost\"].",
+    "hosts": ["10.101.100.101"],
+    "_host_comment": "Legacy single-host fallback key. Optional. Default: not set.",
     "host": "10.101.100.101",
+    "_port_comment": "Eos TCP port for OSC + API. Default: 3037.",
     "port": 3037,
+    "_connectionTimeout_comment": "Connection timeout in ms. Default: 10000.",
     "connectionTimeout": 10000,
-    "reconnectMaxAttempts": 0
+    "_reconnectMaxAttempts_comment": "Reconnect attempts (0 = infinite). Default: 0.",
+    "reconnectMaxAttempts": 0,
+    "_reconnectDelays_comment": "Backoff delays in ms for reconnect attempts. Default: [1000,2000,5000,10000,30000].",
+    "reconnectDelays": [1000, 2000, 5000, 10000, 30000]
   },
 
+  "_cueList_comment": "Cue list number to track. Default: 1.",
   "cueList": 1,
 
   "sync": {
+    "_syncOnConnect_comment": "Run full cue sync on connect. Default: true.",
     "syncOnConnect": true,
+    "_syncInterval_comment": "Periodic full sync interval in ms (0 = disabled). Default: 300000.",
     "syncInterval": 300000,
+    "_prefetchEnabled_comment": "Prefetch upcoming cues. Default: true.",
     "prefetchEnabled": true,
+    "_prefetchCount_comment": "How many cues ahead to prefetch. Default: 2.",
     "prefetchCount": 2,
+    "_cacheTTL_comment": "Cue cache TTL in ms. Default: 600000.",
     "cacheTTL": 600000,
+    "_cacheMaxSize_comment": "Maximum cache entries before pruning. Default: 10000.",
     "cacheMaxSize": 10000
   },
 
   "websocket": {
+    "_port_comment": "Overlay HTTP + WebSocket port. Default: 8081.",
     "port": 8081,
+    "_pingInterval_comment": "WebSocket heartbeat interval in ms. Default: 30000.",
     "pingInterval": 30000
   },
 
   "cueTracking": {
+    "_staleTimeout_comment": "Mark cue stale after no updates for this many ms. Default: 2000.",
     "staleTimeout": 2000,
+    "_completionTimeout_comment": "Auto-finish timeout for completion transitions in ms. Default: 500.",
     "completionTimeout": 500
   },
 
   "logging": {
+    "_level_comment": "Log level: debug | info | warn | error. Default: info.",
     "level": "info",
+    "_logOSC_comment": "Log raw OSC messages (very verbose). Default: false.",
     "logOSC": false,
+    "_logState_comment": "Log cue state transitions. Default: true.",
     "logState": true
+  },
+
+  "obsControl": {
+    "_enabled_comment": "Enable OBS WebSocket control integration. Default: false.",
+    "enabled": false,
+    "_host_comment": "OBS WebSocket host. Default: 127.0.0.1.",
+    "host": "127.0.0.1",
+    "_port_comment": "OBS WebSocket port. Default: 4455.",
+    "port": 4455,
+    "_password_comment": "OBS WebSocket password. Default: \"\".",
+    "password": "",
+    "_recordStartCueNumbers_comment": "Cue numbers that trigger StartRecord. Default: [].",
+    "recordStartCueNumbers": [],
+    "_recordStopCueNumbers_comment": "Cue numbers that trigger StopRecord. Default: [].",
+    "recordStopCueNumbers": [],
+    "_recordChapterMarkers_comment": "Fixed chapter markers fired by cue number. Default: [].",
+    "recordChapterMarkers": [
+      { "cueNumber": "10", "label": "Act 1 Start" },
+      { "cueNumber": "120", "label": "Interval" }
+    ],
+    "_useSceneBreakForChapters_comment": "Create chapter markers when active cue scene changes. Default: false.",
+    "useSceneBreakForChapters": false,
+    "_UseSceneBreakForChapters_comment": "Compatibility alias for older/alternate casing. Default: not set.",
+    "UseSceneBreakForChapters": false,
+    "_recordStartDelayMs_comment": "Delay before StartRecord after trigger cue fire (ms). Default: 0.",
+    "recordStartDelayMs": 0,
+    "_recordStopDelayMs_comment": "Delay before StopRecord after trigger cue fire (ms). Default: 0.",
+    "recordStopDelayMs": 0
   }
 }

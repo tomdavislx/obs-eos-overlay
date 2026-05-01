@@ -27,6 +27,11 @@ export interface ObsControlConfig {
    * Note: requires OBS recording to be active and a compatible recording format (e.g. Hybrid MP4).
    */
   recordChapterMarkers: Array<{ cueNumber: string; label: string }>;
+  /**
+   * Create recording chapter markers when the active cue's scene changes.
+   * Marker label will be the scene text from cue metadata.
+   */
+  useSceneBreakForChapters: boolean;
   /** Wait after start-trigger cue fire before calling OBS StartRecord (ms). */
   recordStartDelayMs: number;
   /** Wait after stop-trigger cue fire before calling OBS StopRecord (ms). */
@@ -110,6 +115,7 @@ const DEFAULT_CONFIG: Config = {
     recordStartCueNumbers: [],
     recordStopCueNumbers: [],
     recordChapterMarkers: [],
+    useSceneBreakForChapters: false,
     recordStartDelayMs: 0,
     recordStopDelayMs: 0,
   },
@@ -372,6 +378,22 @@ export function loadConfig(): Config {
   config.obsControl.recordChapterMarkers = normalizeRecordChapterMarkers(
     (config.obsControl as any).recordChapterMarkers
   );
+  // Support both canonical camelCase and user-provided PascalCase config key.
+  if (typeof (config.obsControl as any).UseSceneBreakForChapters === 'boolean') {
+    config.obsControl.useSceneBreakForChapters = (config.obsControl as any).UseSceneBreakForChapters;
+  }
+  if (fileUserConfig && typeof (fileUserConfig as any).UseSceneBreakForChapters === 'boolean') {
+    config.obsControl.useSceneBreakForChapters = (fileUserConfig as any).UseSceneBreakForChapters;
+  }
+
+  if (process.env.OBS_USE_SCENE_BREAK_FOR_CHAPTERS !== undefined) {
+    config.obsControl.useSceneBreakForChapters =
+      process.env.OBS_USE_SCENE_BREAK_FOR_CHAPTERS === 'true';
+  }
+  if (process.env.USE_SCENE_BREAK_FOR_CHAPTERS !== undefined) {
+    config.obsControl.useSceneBreakForChapters =
+      process.env.USE_SCENE_BREAK_FOR_CHAPTERS === 'true';
+  }
 
   // Removed from app; ignore if still present in older config.json files
   delete (config as unknown as Record<string, unknown>).useEosConsoleAPI;
@@ -514,6 +536,9 @@ export function printConfigSummary(config: Config): void {
     console.log(`  Record start cues: ${config.obsControl.recordStartCueNumbers.join(', ') || '(none)'}`);
     console.log(`  Record stop cues: ${config.obsControl.recordStopCueNumbers.join(', ') || '(none)'}`);
     console.log(`  Chapter markers: ${config.obsControl.recordChapterMarkers.length} configured`);
+    console.log(
+      `  Scene break chapters: ${config.obsControl.useSceneBreakForChapters ? 'Enabled' : 'Disabled'}`
+    );
     console.log(`  Record start delay: ${config.obsControl.recordStartDelayMs}ms`);
     console.log(`  Record stop delay: ${config.obsControl.recordStopDelayMs}ms`);
   }

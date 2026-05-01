@@ -42,6 +42,7 @@ export class EosOverlayBridge extends EventEmitter {
   private recordStopTimer: ReturnType<typeof setTimeout> | null = null;
   /** When false, active-cue-driven OBS triggers are ignored (connection/sync bootstrap). OSC fire still triggers. */
   private obsRecordingTriggersArmed = false;
+  private lastSceneChapterLabel: string | null = null;
 
   constructor(config: Config) {
     super();
@@ -343,6 +344,7 @@ export class EosOverlayBridge extends EventEmitter {
   private handleDisconnected(): void {
     console.warn('[EosOverlayBridge] Eos console disconnected');
     this.obsRecordingTriggersArmed = false;
+    this.lastSceneChapterLabel = null;
     this.broadcastConnectionStatus('reconnecting', 'Connection lost, retrying...');
     this.emit('console-disconnected');
   }
@@ -567,6 +569,34 @@ export class EosOverlayBridge extends EventEmitter {
     void this.obsControlClient.createRecordChapter(marker.label);
   }
 
+  private maybeCreateObsSceneChapterMarker(latestCue: ReturnType<CueStateManager['getActiveCues']>[0] | null): void {
+    if (!this.obsControlClient || !this.config.obsControl.useSceneBreakForChapters) {
+      return;
+    }
+    if (!this.obsRecordingTriggersArmed) {
+      return;
+    }
+
+    if (!latestCue) {
+      return;
+    }
+
+    const scene = typeof latestCue.scene === 'string' ? latestCue.scene.trim() : '';
+    if (!scene) {
+      return;
+    }
+
+    if (scene === this.lastSceneChapterLabel) {
+      return;
+    }
+
+    this.lastSceneChapterLabel = scene;
+    console.log(
+      `[EosOverlayBridge] OBS chapter marker: scene change on ${latestCue.cueList}/${latestCue.cueNumber} → "${scene}"`
+    );
+    void this.obsControlClient.createRecordChapter(scene);
+  }
+
   /**
    * Handle active cue update
    */
@@ -641,6 +671,7 @@ export class EosOverlayBridge extends EventEmitter {
 
   private broadcastCueUpdate(): void {
     const activeCues = this.cueManager.getActiveCues();
+    this.maybeCreateObsSceneChapterMarker(activeCues[0] || null);
     this.overlayServer.broadcastCueUpdate(activeCues);
   }
 }

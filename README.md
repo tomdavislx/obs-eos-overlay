@@ -76,6 +76,25 @@ LOG_OSC=false
 LOG_STATE=true
 ```
 
+For chapter markers from scene breaks, set either:
+
+```bash
+# OBS chapter markers on scene changes (active cue scene text)
+OBS_USE_SCENE_BREAK_FOR_CHAPTERS=true
+```
+
+Or in `config.json`:
+
+```json
+{
+  "obsControl": {
+    "useSceneBreakForChapters": true
+  }
+}
+```
+
+(`UseSceneBreakForChapters` is also accepted for compatibility.)
+
 ## OBS Setup
 
 1. Start the bridge (`npm run dev` or `npm start`).
