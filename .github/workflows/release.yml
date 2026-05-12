@@ -26,6 +26,58 @@ jobs:
       - name: Package binaries
         run: npx pkg dist/index.js --config package.json --compress GZip --output release/eos-obs-bridge
 
+      # ── Code signing ────────────────────────────────────────────────────────
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security create-keychain -p ci-keychain-password build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci-keychain-password build.keychain
+          security import certificate.p12 -k build.keychain \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple: -s -k ci-keychain-password build.keychain
+          rm certificate.p12
+
+      - name: Sign binaries
+        env:
+          DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+        run: |
+          for ARCH in arm64 x64; do
+            codesign \
+              --sign "$DEVELOPER_ID" \
+              --options runtime \
+              --timestamp \
+              --verbose \
+              "release/eos-obs-bridge-macos-${ARCH}"
+          done
+
+      # ── Notarization ────────────────────────────────────────────────────────
+
+      - name: Notarize binaries
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for ARCH in arm64 x64; do
+            echo "Notarizing macos-${ARCH}..."
+            zip -j "notarize-${ARCH}.zip" "release/eos-obs-bridge-macos-${ARCH}"
+            xcrun notarytool submit "notarize-${ARCH}.zip" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_ID_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait \
+              --verbose
+            rm "notarize-${ARCH}.zip"
+          done
+
+      # ── Package release archives ─────────────────────────────────────────────
+
       - name: Create release archives
         run: |
           VERSION="${{ github.ref_name }}"
