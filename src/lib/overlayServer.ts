@@ -35,7 +35,7 @@ export class OverlayServer extends EventEmitter {
   constructor(config: { port: number }) {
     super();
     this.port = config.port;
-    // When packaged with pkg, assets live next to the executable.
+    // When packaged, assets live alongside the executable in the app folder.
     const assetRoot = (process as any).pkg
       ? path.dirname(process.execPath)
       : path.join(__dirname, '..', '..');

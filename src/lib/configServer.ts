@@ -17,7 +17,7 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { Config, loadConfig } from '../config';
 
-// When packaged with pkg, config.json lives next to the executable.
+// When packaged, config.json lives alongside the executable in the app folder.
 const CONFIG_PATH = (process as any).pkg
   ? path.join(path.dirname(process.execPath), 'config.json')
   : path.join(process.cwd(), 'config.json');

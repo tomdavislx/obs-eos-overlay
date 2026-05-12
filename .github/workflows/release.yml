@@ -105,11 +105,11 @@ jobs:
         run: |
           for ARCH in arm64 x64; do
             PKG_ROOT="/tmp/pkg-root-${ARCH}"
-            INSTALL_DIR="$PKG_ROOT/usr/local/eos-obs-bridge"
+            INSTALL_DIR="$PKG_ROOT/Applications/Eos OBS Bridge"
             mkdir -p "$INSTALL_DIR"
 
-            cp "release/eos-obs-bridge-macos-${ARCH}" "$INSTALL_DIR/eos-obs-bridge"
-            chmod +x "$INSTALL_DIR/eos-obs-bridge"
+            cp "release/eos-obs-bridge-macos-${ARCH}" "$INSTALL_DIR/Eos OBS Bridge"
+            chmod +x "$INSTALL_DIR/Eos OBS Bridge"
             cp overlay.html styles.css config.example.json "$INSTALL_DIR/"
 
             # Build unsigned package
