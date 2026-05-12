@@ -10,7 +10,7 @@ describe('CueStateManager', () => {
   });
 
   it('promotes BACKGROUND cue to ACTIVE when the same cue fires again', () => {
-    const m = new CueStateManager({ staleTimeout: 5000, completionTimeout: 500 });
+    const m = new CueStateManager({});
     m.handleFire('1', '1', Date.now());
     expect(m.getCue('1/1')?.state).toBe(CueState.ACTIVE);
 
@@ -27,7 +27,7 @@ describe('CueStateManager', () => {
 
   it('does not run stale timeout for a cue demoted to BACKGROUND by another fire', () => {
     jest.useFakeTimers();
-    const m = new CueStateManager({ staleTimeout: 2000, completionTimeout: 500 });
+    const m = new CueStateManager();
 
     m.handleFire('1', '1', Date.now());
     expect(m.getCue('1/1')?.state).toBe(CueState.ACTIVE);
@@ -42,7 +42,7 @@ describe('CueStateManager', () => {
   });
 
   it('promotes BACKGROUND to ACTIVE on active text and demotes prior main', () => {
-    const m = new CueStateManager({ staleTimeout: 5000, completionTimeout: 500 });
+    const m = new CueStateManager({});
     m.handleFire('1', '10', Date.now());
     m.handleFire('1', '20', Date.now());
     expect(m.getCue('1/10')?.state).toBe(CueState.BACKGROUND);

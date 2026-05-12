@@ -11,16 +11,36 @@ export interface ObsControlClientConfig {
  * Connects lazily on first request; resets connection on errors.
  */
 export class ObsControlClient {
+  private static readonly RECONNECT_DELAY_MS = 5_000;
+
   private readonly obs: OBSWebSocket;
   private readonly config: ObsControlClientConfig;
   private ready: boolean = false;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private stopped: boolean = false;
 
   constructor(config: ObsControlClientConfig) {
     this.config = config;
     this.obs = new OBSWebSocket();
     this.obs.on('ConnectionClosed', () => {
       this.ready = false;
+      if (!this.stopped) {
+        this.scheduleReconnect();
+      }
     });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      if (this.stopped) return;
+      try {
+        await this.ensureConnected();
+      } catch {
+        if (!this.stopped) this.scheduleReconnect();
+      }
+    }, ObsControlClient.RECONNECT_DELAY_MS);
   }
 
   private wsUrl(): string {
@@ -105,7 +125,16 @@ export class ObsControlClient {
     }
   }
 
+  isConnected(): boolean {
+    return this.ready;
+  }
+
   disconnect(): void {
+    this.stopped = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.resetConnection();
   }
 }

@@ -17,14 +17,7 @@ describe('CueDataSync scene range resolution', () => {
       getCue: jest.fn().mockResolvedValue(null),
     } as any;
 
-    const sync = new CueDataSync(connection, {
-      syncOnConnect: false,
-      syncInterval: 0,
-      prefetchEnabled: false,
-      prefetchCount: 0,
-      cacheTTL: 60_000,
-      cacheMaxSize: 1000,
-    });
+    const sync = new CueDataSync(connection, { syncInterval: 0 });
 
     await sync.initialSync(1);
 

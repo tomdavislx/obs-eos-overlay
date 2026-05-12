@@ -21,23 +21,15 @@ interface CueTimers {
 }
 
 export class CueStateManager extends EventEmitter {
+  private static readonly STALE_TIMEOUT_MS = 2000;
+
   private cues: Map<string, CueData> = new Map();
   private cueTimers: Map<string, CueTimers> = new Map();
   private dataSync: CueDataSync | null = null;
-
-  // Configuration
-  private staleTimeout: number;
-  private completionTimeout: number;
   private enableStateLogging: boolean;
 
-  constructor(config: {
-    staleTimeout: number;
-    completionTimeout: number;
-    enableStateLogging?: boolean;
-  }) {
+  constructor(config: { enableStateLogging?: boolean } = {}) {
     super();
-    this.staleTimeout = config.staleTimeout;
-    this.completionTimeout = config.completionTimeout;
     this.enableStateLogging = config.enableStateLogging !== false;
   }
 
@@ -553,7 +545,7 @@ export class CueStateManager extends EventEmitter {
     // Set new timer
     timers.staleTimer = setTimeout(() => {
       this.handleStaleTimeout(cue);
-    }, this.staleTimeout);
+    }, CueStateManager.STALE_TIMEOUT_MS);
   }
 
   /**
@@ -588,7 +580,7 @@ export class CueStateManager extends EventEmitter {
       if (timers) {
         timers.staleTimer = setTimeout(() => {
           this.cleanupCue(cue.cueId);
-        }, this.staleTimeout * 3); // 3x stale timeout = 6 seconds default
+        }, CueStateManager.STALE_TIMEOUT_MS * 3); // 3x stale timeout = 6 seconds default
       }
     }
   }
@@ -636,7 +628,7 @@ export class CueStateManager extends EventEmitter {
     }
 
     // Calculate remaining time based on percentage and estimated completion time
-    let cleanupDelay = this.staleTimeout; // Default fallback
+    let cleanupDelay = CueStateManager.STALE_TIMEOUT_MS; // Default fallback
 
     if (cue.estimatedCompletionTime && cue.percentage) {
       // Parse current percentage

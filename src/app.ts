@@ -50,13 +50,10 @@ export class EosOverlayBridge extends EventEmitter {
 
     // Initialize core components
     this.cueManager = new CueStateManager({
-      staleTimeout: config.cueTracking.staleTimeout,
-      completionTimeout: config.cueTracking.completionTimeout,
       enableStateLogging: config.logging.logState,
     });
     this.overlayServer = new OverlayServer({
       port: config.websocket.port,
-      pingInterval: config.websocket.pingInterval,
     });
 
     // Eos Console API is mandatory in this application
@@ -162,6 +159,10 @@ export class EosOverlayBridge extends EventEmitter {
       },
       overlay: {
         clients: this.overlayServer.getClientCount(),
+      },
+      obs: {
+        enabled: this.config.obsControl.enabled,
+        connected: this.obsControlClient?.isConnected() ?? false,
       },
     };
   }
@@ -672,6 +673,6 @@ export class EosOverlayBridge extends EventEmitter {
   private broadcastCueUpdate(): void {
     const activeCues = this.cueManager.getActiveCues();
     this.maybeCreateObsSceneChapterMarker(activeCues[0] || null);
-    this.overlayServer.broadcastCueUpdate(activeCues);
+    this.overlayServer.broadcastCueUpdate(activeCues, this.config.overlay.showSceneHeaders);
   }
 }

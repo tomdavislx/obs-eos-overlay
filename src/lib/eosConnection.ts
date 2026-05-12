@@ -360,25 +360,20 @@ export class EosConnection extends EventEmitter {
   }
 
   /**
-   * Schedule reconnection attempt
+   * Schedule reconnection attempt using connectionTimeout as a flat retry interval.
    */
   private scheduleReconnect(): void {
     if (this.reconnectTimeout || this.cleanedUp) {
-      return; // Already scheduled or cleaned up
+      return;
     }
 
     this.reconnectionState.isReconnecting = true;
     this.reconnectionState.attemptNumber++;
 
-    const delayIndex = Math.min(
-      this.reconnectionState.attemptNumber - 1,
-      this.config.reconnectDelays.length - 1
-    );
-    const delay = this.config.reconnectDelays[delayIndex];
-
+    const delay = this.config.connectionTimeout;
     this.reconnectionState.nextAttemptAt = Date.now() + delay;
 
-    console.log(`[EosConnection] Scheduling reconnection attempt ${this.reconnectionState.attemptNumber} in ${delay}ms`);
+    console.log(`[EosConnection] Reconnection attempt ${this.reconnectionState.attemptNumber} in ${delay}ms`);
 
     this.setState(EosConnectionState.RECONNECTING);
     this.emit(EosConnectionEvent.RECONNECTING, this.reconnectionState);

@@ -3,12 +3,15 @@
  * Bootstraps the application with configuration, error handling, and graceful shutdown
  */
 
-import { config, printConfigSummary } from './config';
+import { config as initialConfig, loadConfig, printConfigSummary } from './config';
 import { EosOverlayBridge } from './app';
+import { ConfigServer } from './lib/configServer';
 
 // Global reference to application instance
 let app: EosOverlayBridge | null = null;
+let currentConfig = initialConfig;
 let isShuttingDown = false;
+let isRestarting = false;
 
 /**
  * Main application entry point
@@ -21,21 +24,21 @@ async function main() {
     console.log('='.repeat(60) + '\n');
 
     // Print configuration summary
-    printConfigSummary(config);
+    printConfigSummary(currentConfig);
 
-    // Create application instance
-    app = new EosOverlayBridge(config);
+    // Start config UI server (stays alive across bridge restarts)
+    if (currentConfig.configUI.enabled) {
+      const configServer = new ConfigServer({
+        port: currentConfig.configUI.port,
+        getStatus: () => (app ? { ...app.getStatus(), running: app.isRunning() } : { running: false }),
+        getConfig: () => currentConfig,
+      });
+      configServer.on('restart', () => restartBridge());
+      configServer.start();
+    }
 
-    // Set up event handlers
-    setupEventHandlers(app);
-
-    // Start application
-    await app.start();
-
-    console.log('\n' + '='.repeat(60));
-    console.log('  Application running successfully');
-    console.log('  Press Ctrl+C to stop');
-    console.log('='.repeat(60) + '\n');
+    // Start bridge
+    await startBridge();
 
   } catch (error) {
     console.error('\n' + '='.repeat(60));
@@ -43,6 +46,40 @@ async function main() {
     console.error('='.repeat(60));
     console.error(error);
     process.exit(1);
+  }
+}
+
+async function startBridge(): Promise<void> {
+  app = new EosOverlayBridge(currentConfig);
+  setupEventHandlers(app);
+  await app.start();
+
+  console.log('\n' + '='.repeat(60));
+  console.log('  Application running successfully');
+  console.log('  Press Ctrl+C to stop');
+  console.log('='.repeat(60) + '\n');
+}
+
+async function restartBridge(): Promise<void> {
+  if (isRestarting || isShuttingDown) return;
+  isRestarting = true;
+
+  console.log('\n[Main] Restarting bridge with new configuration...');
+
+  try {
+    if (app && app.isRunning()) {
+      app.stop();
+      app = null;
+    }
+
+    currentConfig = loadConfig();
+    printConfigSummary(currentConfig);
+    await startBridge();
+    console.log('[Main] Bridge restarted successfully');
+  } catch (error) {
+    console.error('[Main] Bridge restart failed:', error);
+  } finally {
+    isRestarting = false;
   }
 }
 
@@ -90,6 +127,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`\n[Main] Received ${signal}, shutting down gracefully...`);
 
   try {
+    isRestarting = true; // prevent concurrent restart
     if (app && app.isRunning()) {
       app.stop();
     }

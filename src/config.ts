@@ -48,19 +48,12 @@ export interface Config {
   // Cue List Tracking
   cueList: number;
 
-  // Data Synchronization
+  // Periodic cue data sync (0 = disabled)
   sync: SyncOptions;
 
   // WebSocket Server
   websocket: {
     port: number;
-    pingInterval: number;
-  };
-
-  // Cue State Management
-  cueTracking: {
-    staleTimeout: number;
-    completionTimeout: number;
   };
 
   // Logging
@@ -72,6 +65,17 @@ export interface Config {
 
   // OBS WebSocket control (optional)
   obsControl: ObsControlConfig;
+
+  // Overlay display options
+  overlay: {
+    showSceneHeaders: boolean;
+  };
+
+  // Config UI server
+  configUI: {
+    enabled: boolean;
+    port: number;
+  };
 }
 
 /**
@@ -83,24 +87,13 @@ const DEFAULT_CONFIG: Config = {
     port: 3037,
     connectionTimeout: 10000,
     reconnectMaxAttempts: 0, // Infinite reconnection
-    reconnectDelays: [1000, 2000, 5000, 10000, 30000], // Exponential backoff
   },
   cueList: 1,
   sync: {
-    syncOnConnect: true,
     syncInterval: 300000, // 5 minutes
-    prefetchEnabled: true,
-    prefetchCount: 2,
-    cacheTTL: 600000, // 10 minutes
-    cacheMaxSize: 10000,
   },
   websocket: {
     port: 8081,
-    pingInterval: 30000,
-  },
-  cueTracking: {
-    staleTimeout: 2000,
-    completionTimeout: 500,
   },
   logging: {
     level: 'info',
@@ -118,6 +111,13 @@ const DEFAULT_CONFIG: Config = {
     useSceneBreakForChapters: false,
     recordStartDelayMs: 0,
     recordStopDelayMs: 0,
+  },
+  overlay: {
+    showSceneHeaders: true,
+  },
+  configUI: {
+    enabled: true,
+    port: 8082,
   },
 };
 
@@ -238,27 +238,11 @@ export function loadConfig(): Config {
     }
   }
 
-  // Feature flags
   // Data Synchronization
-  if (process.env.SYNC_ON_CONNECT !== undefined) {
-    config.sync.syncOnConnect = process.env.SYNC_ON_CONNECT === 'true';
-  }
-
   if (process.env.SYNC_INTERVAL) {
     const interval = parseInt(process.env.SYNC_INTERVAL, 10);
     if (!isNaN(interval) && interval >= 0) {
       config.sync.syncInterval = interval;
-    }
-  }
-
-  if (process.env.PREFETCH_ENABLED !== undefined) {
-    config.sync.prefetchEnabled = process.env.PREFETCH_ENABLED === 'true';
-  }
-
-  if (process.env.CACHE_TTL) {
-    const ttl = parseInt(process.env.CACHE_TTL, 10);
-    if (!isNaN(ttl) && ttl > 0) {
-      config.sync.cacheTTL = ttl;
     }
   }
 
@@ -269,28 +253,6 @@ export function loadConfig(): Config {
       config.websocket.port = port;
     } else {
       console.warn(`[Config] Invalid WEBSOCKET_PORT: ${process.env.WEBSOCKET_PORT}, using default ${config.websocket.port}`);
-    }
-  }
-
-  if (process.env.WEBSOCKET_PING_INTERVAL) {
-    const interval = parseInt(process.env.WEBSOCKET_PING_INTERVAL, 10);
-    if (!isNaN(interval) && interval > 0) {
-      config.websocket.pingInterval = interval;
-    }
-  }
-
-  // Cue Tracking
-  if (process.env.STALE_TIMEOUT) {
-    const timeout = parseInt(process.env.STALE_TIMEOUT, 10);
-    if (!isNaN(timeout) && timeout > 0) {
-      config.cueTracking.staleTimeout = timeout;
-    }
-  }
-
-  if (process.env.COMPLETION_TIMEOUT) {
-    const timeout = parseInt(process.env.COMPLETION_TIMEOUT, 10);
-    if (!isNaN(timeout) && timeout > 0) {
-      config.cueTracking.completionTimeout = timeout;
     }
   }
 
@@ -395,6 +357,23 @@ export function loadConfig(): Config {
       process.env.USE_SCENE_BREAK_FOR_CHAPTERS === 'true';
   }
 
+  // Overlay display options
+  if (process.env.OVERLAY_SHOW_SCENE_HEADERS !== undefined) {
+    config.overlay.showSceneHeaders = process.env.OVERLAY_SHOW_SCENE_HEADERS === 'true';
+  }
+
+  // Config UI server
+  if (process.env.CONFIG_UI_ENABLED !== undefined) {
+    config.configUI.enabled = process.env.CONFIG_UI_ENABLED === 'true';
+  }
+
+  if (process.env.CONFIG_UI_PORT) {
+    const port = parseInt(process.env.CONFIG_UI_PORT, 10);
+    if (!isNaN(port) && port > 0 && port <= 65535) {
+      config.configUI.port = port;
+    }
+  }
+
   // Removed from app; ignore if still present in older config.json files
   delete (config as unknown as Record<string, unknown>).useEosConsoleAPI;
 
@@ -434,22 +413,9 @@ function validateConfig(config: Config): void {
     errors.push(`EOS_CONNECTION_TIMEOUT must be at least 1000ms (got ${config.eos.connectionTimeout})`);
   }
 
-  if (config.cueTracking.staleTimeout < 500) {
-    errors.push(`STALE_TIMEOUT must be at least 500ms (got ${config.cueTracking.staleTimeout})`);
-  }
-
   // Validate cue list
   if (config.cueList < 1) {
     errors.push(`CUE_LIST must be positive (got ${config.cueList})`);
-  }
-
-  // Validate sync options
-  if (config.sync.cacheTTL < 1000) {
-    errors.push(`CACHE_TTL must be at least 1000ms (got ${config.sync.cacheTTL})`);
-  }
-
-  if (config.sync.prefetchCount < 1) {
-    errors.push(`Prefetch count must be positive (got ${config.sync.prefetchCount})`);
   }
 
   if (config.obsControl.enabled) {
@@ -501,24 +467,17 @@ export function printConfigSummary(config: Config): void {
   console.log(`  Port: ${config.eos.port}`);
   console.log(`  Connection Timeout: ${config.eos.connectionTimeout}ms`);
   console.log(`  Max Reconnection Attempts: ${config.eos.reconnectMaxAttempts === 0 ? 'Infinite' : config.eos.reconnectMaxAttempts}`);
-  console.log(`  Reconnection Delays: ${config.eos.reconnectDelays.join(', ')}ms`);
+  console.log(`  Reconnection Interval: ${config.eos.connectionTimeout}ms (same as connection timeout)`);
 
-  console.log('\nCue Tracking:');
-  console.log(`  Target Cue List: ${config.cueList}`);
-  console.log(`  Stale Timeout: ${config.cueTracking.staleTimeout}ms`);
-  console.log(`  Completion Timeout: ${config.cueTracking.completionTimeout}ms`);
+  console.log(`\n  Tracking Cue List: ${config.cueList}`);
 
   console.log('\nData Synchronization:');
-  console.log(`  Sync on Connect: ${config.sync.syncOnConnect ? 'Yes' : 'No'}`);
-  console.log(`  Sync Interval: ${config.sync.syncInterval === 0 ? 'Disabled' : `${config.sync.syncInterval}ms`}`);
-  console.log(`  Prefetch Enabled: ${config.sync.prefetchEnabled ? 'Yes' : 'No'}`);
-  console.log(`  Prefetch Count: ${config.sync.prefetchCount} cues ahead`);
-  console.log(`  Cache TTL: ${config.sync.cacheTTL}ms`);
-  console.log(`  Cache Max Size: ${config.sync.cacheMaxSize} entries`);
+  console.log(`  Sync on Connect: Yes (always)`);
+  console.log(`  Periodic Sync: ${config.sync.syncInterval === 0 ? 'Disabled' : `every ${config.sync.syncInterval}ms`}`);
+  console.log(`  Prefetch: next 2 cues (always enabled)`);
 
   console.log('\nOverlay HTTP + WebSocket (same port):');
   console.log(`  Port: ${config.websocket.port}`);
-  console.log(`  Ping Interval: ${config.websocket.pingInterval}ms`);
   console.log(
     `  OBS Browser Source URL: http://127.0.0.1:${config.websocket.port}/ (avoid file:// — OBS CEF often blocks WebSocket)`
   );

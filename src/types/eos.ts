@@ -13,9 +13,8 @@ export interface EosConnectionConfig {
    */
   hosts: string[];
   port: number;                       // Port for OSC + API (default: 3037)
-  connectionTimeout: number;          // Connection timeout in ms
+  connectionTimeout: number;          // Connection timeout in ms (also used as fixed retry interval)
   reconnectMaxAttempts: number;       // Max reconnection attempts (0 = infinite)
-  reconnectDelays: number[];          // Exponential backoff delays in ms [1000, 2000, 5000, 10000, 30000]
 }
 
 /**
@@ -100,12 +99,7 @@ export interface CueCacheEntry {
  * Data synchronization configuration
  */
 export interface SyncOptions {
-  syncOnConnect: boolean;             // Perform full sync on connection
-  syncInterval: number;               // Full sync interval in ms (0 = disabled)
-  prefetchEnabled: boolean;           // Enable smart prefetch
-  prefetchCount: number;              // Number of cues to prefetch ahead
-  cacheTTL: number;                   // Cache time-to-live in ms
-  cacheMaxSize: number;               // Maximum cache entries
+  syncInterval: number;               // Periodic full sync interval in ms (0 = disabled)
 }
 
 /**

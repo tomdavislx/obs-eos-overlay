@@ -34,6 +34,7 @@ export interface CueUpdateMessage extends OverlayMessage {
     activeCues: CueData[];
     latestCue: CueData | null;
     totalTrackedCues: number;
+    showSceneHeaders: boolean;
   };
 }
 

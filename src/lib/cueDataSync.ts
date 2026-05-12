@@ -16,6 +16,9 @@ import {
 } from '../types/eos';
 
 export class CueDataSync extends EventEmitter {
+  private static readonly CACHE_TTL_MS = 600_000; // 10 minutes
+  private static readonly PREFETCH_COUNT = 2;
+
   private connection: EosConnection;
   private options: SyncOptions;
   private cache: Map<string, CueCacheEntry> = new Map();
@@ -41,12 +44,8 @@ export class CueDataSync extends EventEmitter {
    * Initialize sync service
    */
   async initialize(cueList: number): Promise<void> {
-    // Perform initial sync if configured
-    if (this.options.syncOnConnect) {
-      await this.initialSync(cueList);
-    }
+    await this.initialSync(cueList);
 
-    // Schedule periodic sync if configured
     if (this.options.syncInterval > 0) {
       this.schedulePeriodicSync(cueList);
     }
@@ -172,28 +171,25 @@ export class CueDataSync extends EventEmitter {
    * Prefetch next cues (anticipate operator workflow)
    */
   prefetchNextCues(currentCueList: number, currentCueNumber: number): void {
-    if (!this.options.prefetchEnabled) {
-      return;
-    }
+    // Walk the sorted cache to find the next PREFETCH_COUNT cues by position,
+    // not by arithmetic — handles non-sequential numbering (gaps, fractional, etc.)
+    // Uses raw cache entries (ignoring TTL) to discover cue numbers to warm up.
+    const nextCueNumbers = Array.from(this.cache.values())
+      .filter(e => e.cueList === currentCueList && e.cueNumber > currentCueNumber)
+      .sort((a, b) => a.cueNumber - b.cueNumber)
+      .slice(0, CueDataSync.PREFETCH_COUNT)
+      .map(e => e.cueNumber);
 
-    const cuesToPrefetch: number[] = [];
+    if (nextCueNumbers.length === 0) return;
 
-    // Generate next cue numbers to prefetch
-    for (let i = 1; i <= this.options.prefetchCount; i++) {
-      cuesToPrefetch.push(currentCueNumber + i);
-    }
-
-    // Create prefetch request
     const request: PrefetchRequest = {
       cueList: currentCueList,
-      cueNumbers: cuesToPrefetch,
+      cueNumbers: nextCueNumbers,
       priority: 'normal',
       requestedAt: Date.now(),
     };
 
     this.prefetchQueue.push(request);
-
-    // Process queue
     this.processPrefetchQueue();
   }
 
@@ -207,12 +203,8 @@ export class CueDataSync extends EventEmitter {
   /**
    * Get cache statistics
    */
-  getCacheStats(): { size: number; maxSize: number; hitRate: number } {
-    return {
-      size: this.cache.size,
-      maxSize: this.options.cacheMaxSize,
-      hitRate: 0, // TODO: Implement hit rate tracking
-    };
+  getCacheStats(): { size: number } {
+    return { size: this.cache.size };
   }
 
   /**
@@ -321,7 +313,7 @@ export class CueDataSync extends EventEmitter {
    */
   private isCacheValid(entry: CueCacheEntry): boolean {
     const age = Date.now() - entry.cachedAt;
-    return age < this.options.cacheTTL;
+    return age < CueDataSync.CACHE_TTL_MS;
   }
 
   /**
@@ -415,43 +407,4 @@ export class CueDataSync extends EventEmitter {
     }
   }
 
-  /**
-   * Cleanup expired cache entries
-   */
-  private cleanupExpiredEntries(): void {
-    let removed = 0;
-
-    for (const [cueId, entry] of this.cache.entries()) {
-      if (!this.isCacheValid(entry)) {
-        this.cache.delete(cueId);
-        removed++;
-      }
-    }
-
-    if (removed > 0) {
-      console.log(`[CueDataSync] Cleaned up ${removed} expired cache entries`);
-      this.syncStatus.cuesInCache = this.cache.size;
-    }
-  }
-
-  /**
-   * Enforce cache size limit
-   */
-  private enforceCacheLimit(): void {
-    if (this.cache.size <= this.options.cacheMaxSize) {
-      return;
-    }
-
-    // Remove oldest entries
-    const entries = Array.from(this.cache.entries());
-    entries.sort((a, b) => a[1].cachedAt - b[1].cachedAt);
-
-    const toRemove = this.cache.size - this.options.cacheMaxSize;
-    for (let i = 0; i < toRemove; i++) {
-      this.cache.delete(entries[i][0]);
-    }
-
-    console.log(`[CueDataSync] Removed ${toRemove} entries to enforce cache limit`);
-    this.syncStatus.cuesInCache = this.cache.size;
-  }
 }

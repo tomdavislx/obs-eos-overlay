@@ -20,21 +20,21 @@ interface Client {
 }
 
 export class OverlayServer extends EventEmitter {
+  private static readonly PING_INTERVAL_MS = 30_000;
+
   private httpServer: http.Server | null = null;
   private wss: WebSocketServer | null = null;
   private clients: Map<string, Client> = new Map();
   private port: number;
-  private pingInterval: number;
   private pingTimer: NodeJS.Timeout | null = null;
   private nextClientId: number = 1;
   private readonly overlayHtmlPath: string;
   private readonly stylesCssPath: string;
   private readonly isDevMode: boolean;
 
-  constructor(config: { port: number; pingInterval: number }) {
+  constructor(config: { port: number }) {
     super();
     this.port = config.port;
-    this.pingInterval = config.pingInterval;
     this.overlayHtmlPath = path.join(__dirname, '..', '..', 'overlay.html');
     this.stylesCssPath = path.join(__dirname, '..', '..', 'styles.css');
     this.isDevMode = process.env.NODE_ENV !== 'production';
@@ -160,7 +160,7 @@ export class OverlayServer extends EventEmitter {
   /**
    * Broadcast cue update to all connected clients
    */
-  broadcastCueUpdate(activeCues: CueData[]): void {
+  broadcastCueUpdate(activeCues: CueData[], showSceneHeaders: boolean = true): void {
     const latestCue = activeCues.length > 0 ? activeCues[0] : null;
 
     const message: OverlayMessage = {
@@ -170,6 +170,7 @@ export class OverlayServer extends EventEmitter {
         activeCues,
         latestCue,
         totalTrackedCues: activeCues.length,
+        showSceneHeaders,
       },
     };
 
@@ -329,7 +330,7 @@ export class OverlayServer extends EventEmitter {
 
     this.pingTimer = setInterval(() => {
       this.pingClients();
-    }, this.pingInterval);
+    }, OverlayServer.PING_INTERVAL_MS);
   }
 
   /**

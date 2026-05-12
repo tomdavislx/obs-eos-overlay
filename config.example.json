@@ -13,41 +13,20 @@
     "_connectionTimeout_comment": "Connection timeout in ms. Default: 10000.",
     "connectionTimeout": 10000,
     "_reconnectMaxAttempts_comment": "Reconnect attempts (0 = infinite). Default: 0.",
-    "reconnectMaxAttempts": 0,
-    "_reconnectDelays_comment": "Backoff delays in ms for reconnect attempts. Default: [1000,2000,5000,10000,30000].",
-    "reconnectDelays": [1000, 2000, 5000, 10000, 30000]
+    "reconnectMaxAttempts": 0
   },
 
   "_cueList_comment": "Cue list number to track. Default: 1.",
   "cueList": 1,
 
   "sync": {
-    "_syncOnConnect_comment": "Run full cue sync on connect. Default: true.",
-    "syncOnConnect": true,
-    "_syncInterval_comment": "Periodic full sync interval in ms (0 = disabled). Default: 300000.",
-    "syncInterval": 300000,
-    "_prefetchEnabled_comment": "Prefetch upcoming cues. Default: true.",
-    "prefetchEnabled": true,
-    "_prefetchCount_comment": "How many cues ahead to prefetch. Default: 2.",
-    "prefetchCount": 2,
-    "_cacheTTL_comment": "Cue cache TTL in ms. Default: 600000.",
-    "cacheTTL": 600000,
-    "_cacheMaxSize_comment": "Maximum cache entries before pruning. Default: 10000.",
-    "cacheMaxSize": 10000
+    "_syncInterval_comment": "Periodic full sync interval in ms (0 = disabled). Default: 300000. Sync on connect and prefetch of next 2 cues are always enabled.",
+    "syncInterval": 300000
   },
 
   "websocket": {
     "_port_comment": "Overlay HTTP + WebSocket port. Default: 8081.",
-    "port": 8081,
-    "_pingInterval_comment": "WebSocket heartbeat interval in ms. Default: 30000.",
-    "pingInterval": 30000
-  },
-
-  "cueTracking": {
-    "_staleTimeout_comment": "Mark cue stale after no updates for this many ms. Default: 2000.",
-    "staleTimeout": 2000,
-    "_completionTimeout_comment": "Auto-finish timeout for completion transitions in ms. Default: 500.",
-    "completionTimeout": 500
+    "port": 8081
   },
 
   "logging": {

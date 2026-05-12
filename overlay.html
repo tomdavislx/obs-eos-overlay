@@ -203,8 +203,9 @@
           // Handle different message types
           if (message.type === 'CUE_UPDATE') {
             const data = message.data;
+            const showSceneHeaders = data.showSceneHeaders !== false;
             if (data.latestCue) {
-              updateMainCue(data.latestCue);
+              updateMainCue(data.latestCue, showSceneHeaders);
               updateRunningCues(data.activeCues);
             }
             // If no active cues, leave the display as-is — the console is almost
@@ -239,8 +240,8 @@
         };
       }
 
-      function updateMainCue(latestCue) {
-        renderCueLines(mainCueElement, latestCue, { prefix: "LXQ: ", includeScene: true });
+      function updateMainCue(latestCue, showSceneHeaders = true) {
+        renderCueLines(mainCueElement, latestCue, { prefix: "LXQ: ", includeScene: showSceneHeaders });
 
         const cueStateKey = getCueStateKey(latestCue) || latestCue.cueId;
         const isNewCue = lastFlashedCue !== cueStateKey;
