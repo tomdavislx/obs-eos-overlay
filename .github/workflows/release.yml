@@ -24,7 +24,9 @@ jobs:
         run: npm run build
 
       - name: Package binaries
-        run: npx pkg dist/index.js --config package.json --compress GZip --output release/eos-obs-bridge
+        run: |
+          mkdir -p release
+          npx pkg dist/index.js --config package.json --compress GZip --output release/eos-obs-bridge
 
       # ── Code signing ────────────────────────────────────────────────────────
 
