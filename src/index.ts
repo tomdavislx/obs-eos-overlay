@@ -34,6 +34,7 @@ async function main() {
         getConfig: () => currentConfig,
       });
       configServer.on('restart', () => restartBridge());
+      configServer.on('shutdown', () => shutdown('config-ui'));
       configServer.start();
     }
 

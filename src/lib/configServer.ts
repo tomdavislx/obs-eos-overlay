@@ -91,6 +91,13 @@ export class ConfigServer extends EventEmitter {
       return;
     }
 
+    if (url === '/api/shutdown' && method === 'POST') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      setTimeout(() => this.emit('shutdown'), 150);
+      return;
+    }
+
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
   }
@@ -279,9 +286,25 @@ td input{padding:4px 7px}
 
 /* ── Disabled overlay ── */
 .disabled-note{font-size:12px;color:var(--muted);font-style:italic;padding:4px 0}
+
+/* ── Connection lost modal ── */
+#conn-modal{display:none;position:fixed;inset:0;z-index:200;align-items:center;justify-content:center;background:#000a}
+#conn-modal.visible{display:flex}
+.conn-box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:32px 36px;text-align:center;box-shadow:0 8px 40px #000c;max-width:320px;width:90%}
+.conn-box h2{margin:0 0 8px;font-size:16px;font-weight:600;color:var(--text)}
+.conn-box p{margin:0 0 24px;font-size:13px;color:var(--muted)}
+.conn-box .btn-primary{width:100%;justify-content:center}
 </style>
 </head>
 <body>
+
+<div id="conn-modal">
+  <div class="conn-box">
+    <h2>Unable to connect to server</h2>
+    <p>The bridge may have stopped or restarted.</p>
+    <button class="btn-primary" id="conn-retry-btn">Retry</button>
+  </div>
+</div>
 
 <header>
   <div class="h-title">Eos &rarr; OBS Bridge</div>
@@ -298,7 +321,8 @@ td input{padding:4px 7px}
     </div>
   </div>
   <div class="h-actions">
-    <button class="btn-primary" id="save-btn">Save &amp; Restart</button>
+    <button class="btn-ghost" id="shutdown-btn">Stop Server</button>
+    <button class="btn-primary" id="save-btn">Apply</button>
   </div>
 </header>
 
@@ -655,10 +679,27 @@ function loadConfig() {
 
 // ── Save ──────────────────────────────────────────────────────────────────
 
+document.getElementById('shutdown-btn').addEventListener('click', function() {
+  var btn = document.getElementById('shutdown-btn');
+  btn.disabled = true;
+  btn.textContent = 'Stopping…';
+  fetch('/api/shutdown', { method: 'POST' })
+    .then(function() {
+      btn.textContent = 'Stopped';
+      document.getElementById('save-btn').disabled = true;
+      showToast('Server stopped', 'ok', 0);
+    })
+    .catch(function() {
+      btn.disabled = false;
+      btn.textContent = 'Stop Server';
+      showToast('Shutdown request failed', 'err', 4000);
+    });
+});
+
 document.getElementById('save-btn').addEventListener('click', function() {
   var btn = document.getElementById('save-btn');
   btn.disabled = true;
-  btn.textContent = 'Saving…';
+  btn.textContent = 'Applying…';
 
   var cfg = collectForm();
 
@@ -672,7 +713,7 @@ document.getElementById('save-btn').addEventListener('click', function() {
     if (!res.ok) {
       showToast('Error: ' + res.data.error, 'err', 8000);
       btn.disabled = false;
-      btn.textContent = 'Save & Restart';
+      btn.textContent = 'Apply';
       return;
     }
     showToast('Saved. Bridge restarting…', 'ok', 10000);
@@ -682,7 +723,7 @@ document.getElementById('save-btn').addEventListener('click', function() {
   .catch(function(e) {
     showToast('Request failed: ' + e.message, 'err', 6000);
     btn.disabled = false;
-    btn.textContent = 'Save & Restart';
+    btn.textContent = 'Apply';
   });
 });
 
@@ -696,7 +737,7 @@ function pollRestart(since) {
           showToast('Bridge restarted successfully', 'ok', 3000);
           var btn = document.getElementById('save-btn');
           btn.disabled = false;
-          btn.textContent = 'Save & Restart';
+          btn.textContent = 'Apply';
           loadConfig();
         } else if (Date.now() - since > 15000) {
           showToast('Bridge taking longer than expected to start', 'err', 6000);
@@ -758,17 +799,46 @@ function applyStatus(s) {
   }
 }
 
+function showConnModal() {
+  document.getElementById('conn-modal').classList.add('visible');
+  document.getElementById('save-btn').disabled = true;
+  document.getElementById('shutdown-btn').disabled = true;
+}
+
+function hideConnModal() {
+  document.getElementById('conn-modal').classList.remove('visible');
+  document.getElementById('save-btn').disabled = false;
+  document.getElementById('shutdown-btn').disabled = false;
+}
+
 function refreshStatus() {
   fetch('/api/status')
     .then(function(r){ return r.json(); })
-    .then(applyStatus)
+    .then(function(s) {
+      hideConnModal();
+      applyStatus(s);
+    })
     .catch(function() {
-      document.getElementById('eos-dot').className = 'dot err';
-      document.getElementById('eos-text').textContent = 'Unavailable';
-      document.getElementById('obs-dot').className = 'dot';
-      document.getElementById('obs-text').textContent = '—';
+      showConnModal();
     });
 }
+
+document.getElementById('conn-retry-btn').addEventListener('click', function() {
+  var btn = document.getElementById('conn-retry-btn');
+  btn.disabled = true;
+  btn.textContent = 'Retrying…';
+  fetch('/api/status')
+    .then(function(r){ return r.json(); })
+    .then(function(s) {
+      hideConnModal();
+      applyStatus(s);
+      loadConfig();
+    })
+    .catch(function() {
+      btn.disabled = false;
+      btn.textContent = 'Retry';
+    });
+});
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 
