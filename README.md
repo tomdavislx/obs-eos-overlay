@@ -1,203 +1,92 @@
-# Eos-to-OBS Overlay Bridge
+# Eos → OBS Bridge
 
-Real-time lighting cue overlay for OBS Studio, synced with ETC Eos lighting consoles.
+Displays live lighting cue information as an overlay in OBS Studio, synced in real-time with an ETC Eos lighting console.
 
-## Features
+## What it does
 
-- **Live Cue Tracking**: Displays active and background cues in real-time
-- **Accurate Fade Times**: Retrieves precise timing data from Eos console API
-- **Smart Caching**: Three-tier caching strategy (initial sync + on-demand + prefetch)
-- **Automatic Reconnection**: Exponential backoff with infinite retry attempts
-- **State Management**: Tracks cue lifecycle through DISCOVERED → ACTIVE → COMPLETING → FINISHED
-- **Overlay HTTP + WebSocket**: Serves `overlay.html` and cue updates on one port (reliable in OBS’s browser)
+- Shows the active cue number and label on screen as cues fire
+- Displays background (running) cues below the main cue
+- Connects directly to your Eos console over the network
+- Keeps the overlay up to date automatically — no manual intervention needed
 
-## Quick Start
+## Download
 
-### Prerequisites
+Download the latest release for your Mac from the [Releases](../../releases) page:
 
-- Node.js 16+
-- ETC Eos console with "Third Party OSC" enabled
-- OBS Studio
+- **Apple Silicon (M1/M2/M3/M4)** → `eos-obs-bridge-vX.X.X-macos-arm64.zip`
+- **Intel Mac** → `eos-obs-bridge-vX.X.X-macos-x64.zip`
 
-### Installation
+Unzip and you'll have:
 
-```bash
-npm install
+```
+eos-obs-bridge      ← the application
+overlay.html        ← the OBS overlay page
+styles.css          ← overlay styling
+config.json         ← your configuration (edit this)
 ```
 
-### Testing Connection
+## Setup
 
-Before running the application, test your Eos console connection:
+### 1. Configure the bridge
 
-```bash
-# Test basic TCP connectivity
-npm run test:tcp
-
-# Test full Eos Console API
-npm run test:connection
-```
-
-### Running
-
-```bash
-# Development (with auto-reload)
-npm run dev
-
-# Production
-npm start
-```
-
-### Configuration
-
-Set environment variables or create a `.env` file:
-
-```bash
-# Eos Console
-EOS_HOST=10.101.100.101
-EOS_PORT=3037
-
-# Cue Tracking
-CUE_LIST=1
-STALE_TIMEOUT=2000
-COMPLETION_TIMEOUT=500
-
-# Data Sync
-SYNC_ON_CONNECT=true
-SYNC_INTERVAL=300000
-PREFETCH_ENABLED=true
-CACHE_TTL=600000
-
-# Overlay (HTTP page + WebSocket on same port)
-WEBSOCKET_PORT=8081
-
-# Logging
-LOG_LEVEL=info
-LOG_OSC=false
-LOG_STATE=true
-```
-
-For chapter markers from scene breaks, set either:
-
-```bash
-# OBS chapter markers on scene changes (active cue scene text)
-OBS_USE_SCENE_BREAK_FOR_CHAPTERS=true
-```
-
-Or in `config.json`:
+Open `config.json` in any text editor. At minimum, set the IP address of your Eos console:
 
 ```json
 {
-  "obsControl": {
-    "useSceneBreakForChapters": true
+  "eos": {
+    "hosts": ["10.101.100.101"]
   }
 }
 ```
 
-(`UseSceneBreakForChapters` is also accepted for compatibility.)
+All other settings can be adjusted through the built-in web interface once the bridge is running.
 
-## OBS Setup
+### 2. Prepare your Eos console
 
-1. Start the bridge (`npm run dev` or `npm start`).
-2. Add a **Browser Source** in OBS.
-3. Set the URL to **`http://127.0.0.1:8081/`** (use your `WEBSOCKET_PORT` if you changed it).  
-   **Do not use “Local file”** for the overlay: OBS’s embedded browser often blocks WebSocket from `file://`, while a normal desktop browser still works with a local file.
-4. If the bridge runs on another computer, use **`http://<bridge-machine-LAN-IP>:8081/`** instead.
-5. Set dimensions (e.g. 1920×1080).
+Two settings are required in Eos:
 
-The page and WebSocket share the same host and port, so no extra query parameters are needed unless you intentionally override them (`?bridgeHost=` / `?bridgePort=`).
+1. **Enable Third Party OSC** — `[Displays]` key → Shell tab → enable "Third Party OSC"
+2. **Allow Remotes** — `[Setup]` → System Settings → System → Show Control → check "Allow Remotes"
 
-## Eos Console Setup
+### 3. Run the bridge
 
-### Required Settings
-
-1. **Enable Third Party OSC**:
-   - Press `[Displays]` key
-   - Select "Shell" tab
-   - Enable "Third Party OSC"
-
-2. **Enable Allow Remotes**:
-   - `[Setup]` → System Settings → System → Show Control
-   - Check "Allow Remotes" checkbox
-
-### Verification
-
-Run the connection test to verify setup:
-```bash
-npm run test:connection
-```
-
-You should see:
-- ✅ Connection successful
-- Console version displayed
-- Cues retrieved from list 1
-
-## Development
+Open Terminal, navigate to the folder, and run:
 
 ```bash
-# Run with TypeScript auto-reload
-npm run dev
-
-# Build for production
-npm run build
-
-# Run compiled version
-npm start
-
-# Run legacy JavaScript version
-npm run legacy
+./eos-obs-bridge
 ```
 
-### VS Code Debugging
+The bridge will print its status as it starts up. Leave this Terminal window open while you're using it.
 
-Use the built-in launch configurations:
-- **Run TypeScript Server** - Quick start with ts-node
-- **Debug TypeScript Server** - With breakpoints
-- **Run Compiled Server** - Test production build
+### 4. Add the overlay in OBS
 
-## Architecture
+1. Add a **Browser Source** in OBS
+2. Set the URL to **`http://127.0.0.1:8081/`**
+3. Set the dimensions to match your canvas (e.g. 1920×1080)
 
-- **src/index.ts** - Entry point with graceful shutdown
-- **src/app.ts** - Main orchestrator (EosOverlayBridge)
-- **src/config.ts** - Configuration management
-- **src/lib/eosConnection.ts** - Eos console connection with reconnection
-- **src/lib/cueDataSync.ts** - Cue data caching and synchronization
-- **src/lib/cueStateManager.ts** - Cue lifecycle state management
-- **src/lib/oscParser.ts** - OSC message parsing
-- **src/lib/overlayServer.ts** - HTTP server for `overlay.html` + WebSocket cue broadcast (same port)
+> **Important:** use the HTTP URL above — do not point OBS at the `overlay.html` file directly. OBS's browser blocks WebSocket connections from local files.
+
+If your bridge is running on a different machine to OBS, use that machine's IP address instead of `127.0.0.1`.
+
+### 5. Configure via the web interface
+
+Open **`http://127.0.0.1:8082/`** in a browser to access the configuration UI. From here you can adjust all settings and apply them without restarting manually.
+
+## OBS Control (optional)
+
+The bridge can trigger OBS recording and insert chapter markers based on cue fires. Enable this in the web interface under **OBS Control**, and enter your OBS WebSocket details (found in OBS under Tools → WebSocket Server Settings).
+
+## Stopping the bridge
+
+Click **Stop Server** in the web interface, or press `Ctrl+C` in the Terminal window.
 
 ## Troubleshooting
 
-### Connection Issues
+**Overlay shows "Waiting for connection..."**
+The bridge isn't reachable from OBS. Check the bridge is running and that you're using `http://127.0.0.1:8081/` as the Browser Source URL (not a file path).
 
-**Timeout errors:**
-1. Verify Eos console IP address
-2. Check "Third Party OSC" is enabled
-3. Check "Allow Remotes" is enabled
-4. Test with: `npm run test:tcp`
+**Bridge can't connect to Eos**
+Verify the IP address in `config.json`, and confirm both "Third Party OSC" and "Allow Remotes" are enabled on the console. The bridge will keep retrying automatically.
 
-**No cue data:**
-1. Verify the bridge can connect to the console on port `3037`
-2. Check cue list number is correct
-3. Run: `npm run test:connection`
-
-**OSC messages not received:**
-1. Check console is sending OSC to correct IP/port
-2. Enable OSC logging: `LOG_OSC=true`
-3. Verify firewall allows port 3037
-
-### Overlay Issues
-
-**Overlay not updating or stuck “waiting for bridge WebSocket”:**
-1. Use **`http://127.0.0.1:<WEBSOCKET_PORT>/`** in the Browser Source, not a path to `overlay.html` on disk.
-2. Confirm the bridge log shows the overlay URL and `[OverlayServer] Client connected`.
-3. Open the same URL in Chrome/Safari on that machine; if it works there but not in OBS, the URL is correct and the issue is OBS-specific cache or source settings—refresh the Browser Source.
-4. From another PC, the URL must be the **bridge machine’s** IP, not `127.0.0.1` on the OBS machine.
-
-**Incorrect timing:**
-1. Ensure the bridge can connect to the console on port `3037` for accurate fade times
-2. Check console cue list has timing data
-3. Watch for sync logs in console output
-
-## License
-
-ISC
+**macOS says the app can't be opened**
+Right-click the `eos-obs-bridge` file and choose Open, then confirm. You only need to do this once.
