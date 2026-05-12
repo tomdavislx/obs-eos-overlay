@@ -24,6 +24,9 @@ const CONFIG_PATH = (process as any).pkg
   ? path.join(os.homedir(), 'Library', 'Application Support', 'Eos OBS Bridge', 'config.json')
   : path.join(process.cwd(), 'config.json');
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const APP_VERSION: string = require('../../package.json').version;
+
 export class ConfigServer extends EventEmitter {
   private server: http.Server | null = null;
   private readonly port: number;
@@ -200,6 +203,7 @@ header{
   padding:0 20px;height:52px;gap:12px
 }
 .h-title{font-size:15px;font-weight:600;letter-spacing:.02em;white-space:nowrap}
+.h-version{font-size:11px;font-weight:400;opacity:.45;margin-left:4px;letter-spacing:0}
 .h-indicators{display:flex;align-items:center;gap:20px;flex:1;justify-content:center}
 .indicator{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
 .indicator-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:2px}
@@ -312,7 +316,7 @@ td input{padding:4px 7px}
 </div>
 
 <header>
-  <div class="h-title">Eos &rarr; OBS Bridge</div>
+  <div class="h-title">Eos &rarr; OBS Bridge <span class="h-version">v${APP_VERSION}</span></div>
   <div class="h-indicators">
     <div class="indicator">
       <span class="indicator-label">Eos</span>
