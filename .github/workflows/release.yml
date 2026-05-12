@@ -26,7 +26,9 @@ jobs:
       - name: Package binaries
         run: |
           mkdir -p release
-          npx pkg dist/index.js --config package.json --compress GZip --output release/eos-obs-bridge
+          npx pkg dist/index.js --targets node20-macos-arm64 --output release/eos-obs-bridge-macos-arm64
+          npx pkg dist/index.js --targets node20-macos-x64 --output release/eos-obs-bridge-macos-x64
+          ls -la release/
 
       # ── Code signing ────────────────────────────────────────────────────────
 
