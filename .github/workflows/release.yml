@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Package binaries
+        run: npx pkg dist/index.js --config package.json --compress GZip --output release/eos-obs-bridge
+
+      - name: Create release archives
+        run: |
+          VERSION="${{ github.ref_name }}"
+
+          for ARCH in arm64 x64; do
+            STAGING="/tmp/eos-obs-bridge-macos-${ARCH}"
+            mkdir -p "$STAGING"
+
+            cp "release/eos-obs-bridge-macos-${ARCH}" "$STAGING/eos-obs-bridge"
+            chmod +x "$STAGING/eos-obs-bridge"
+
+            cp overlay.html styles.css "$STAGING/"
+            cp config.example.json "$STAGING/config.json"
+
+            cd "$STAGING"
+            zip -r "$GITHUB_WORKSPACE/eos-obs-bridge-${VERSION}-macos-${ARCH}.zip" .
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: eos-obs-bridge-*.zip
+          generate_release_notes: true

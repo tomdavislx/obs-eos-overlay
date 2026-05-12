@@ -35,8 +35,12 @@ export class OverlayServer extends EventEmitter {
   constructor(config: { port: number }) {
     super();
     this.port = config.port;
-    this.overlayHtmlPath = path.join(__dirname, '..', '..', 'overlay.html');
-    this.stylesCssPath = path.join(__dirname, '..', '..', 'styles.css');
+    // When packaged with pkg, assets live next to the executable.
+    const assetRoot = (process as any).pkg
+      ? path.dirname(process.execPath)
+      : path.join(__dirname, '..', '..');
+    this.overlayHtmlPath = path.join(assetRoot, 'overlay.html');
+    this.stylesCssPath = path.join(assetRoot, 'styles.css');
     this.isDevMode = process.env.NODE_ENV !== 'production';
   }
 

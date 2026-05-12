@@ -340,3 +340,6 @@ typings/
 
 # Local configuration (use config.example.json as template)
 config.json
+
+# pkg release binaries
+release/

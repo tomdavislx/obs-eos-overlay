@@ -17,7 +17,10 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { Config, loadConfig } from '../config';
 
-const CONFIG_PATH = path.join(process.cwd(), 'config.json');
+// When packaged with pkg, config.json lives next to the executable.
+const CONFIG_PATH = (process as any).pkg
+  ? path.join(path.dirname(process.execPath), 'config.json')
+  : path.join(process.cwd(), 'config.json');
 
 export class ConfigServer extends EventEmitter {
   private server: http.Server | null = null;
