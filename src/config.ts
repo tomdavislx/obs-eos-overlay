@@ -3,6 +3,9 @@
  * Loads configuration from environment variables with validation
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   EosConnectionConfig,
   SyncOptions,
@@ -11,6 +14,14 @@ import {
   normalizeCueNumberList,
   parseCommaSeparatedCueNumbers,
 } from './lib/obsRecordingTriggers';
+
+function getConfigPath(): string {
+  if ((process as any).pkg) {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'Eos OBS Bridge', 'config.json');
+  }
+  return path.join(process.cwd(), 'config.json');
+}
+const CONFIG_FILE_PATH = getConfigPath();
 
 /**
  * OBS Studio WebSocket (obs-websocket v5) — recording triggers from Eos cue fire
@@ -171,9 +182,7 @@ export function loadConfig(): Config {
 
   // Try to load from config.json
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const configPath = path.join(process.cwd(), 'config.json');
+    const configPath = CONFIG_FILE_PATH;
 
     if (fs.existsSync(configPath)) {
       const configFile = fs.readFileSync(configPath, 'utf-8');

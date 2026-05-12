@@ -32,6 +32,17 @@ jobs:
           npx pkg dist/index.js --targets node20-macos-x64 --output release/eos-obs-bridge-macos-x64
           ls -la release/
 
+      - name: Compile Swift menu bar app
+        run: |
+          swiftc macos-app/EosOBSBridge.swift \
+            -framework Cocoa \
+            -target arm64-apple-macos12.0 \
+            -o release/EosOBSBridge-arm64
+          swiftc macos-app/EosOBSBridge.swift \
+            -framework Cocoa \
+            -target x86_64-apple-macos12.0 \
+            -o release/EosOBSBridge-x64
+
       # ── Code signing ────────────────────────────────────────────────────────
 
       - name: Import signing certificates
@@ -58,11 +69,59 @@ jobs:
           security set-key-partition-list \
             -S apple-tool:,apple: -s -k ci-keychain-password build.keychain
 
-      - name: Sign binaries
+      # ── Build, sign, notarize, and package .app + .pkg ───────────────────────
+
+      - name: Build and sign .app bundles
         env:
           DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          INSTALLER_ID: ${{ secrets.APPLE_INSTALLER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ github.ref_name }}
         run: |
+          VERSION_NUM="${VERSION#v}"
+
           for ARCH in arm64 x64; do
+            APP="release/Eos OBS Bridge.app"
+            MACOS_DIR="$APP/Contents/MacOS"
+            RES_DIR="$APP/Contents/Resources"
+
+            # ── Assemble bundle ──────────────────────────────────────────────
+            mkdir -p "$MACOS_DIR" "$RES_DIR"
+
+            # Info.plist (substitute version number)
+            sed "s/VERSION_PLACEHOLDER/$VERSION_NUM/g" macos-app/Info.plist \
+              > "$APP/Contents/Info.plist"
+
+            # Swift menu bar app → CFBundleExecutable
+            cp "release/EosOBSBridge-${ARCH}" "$MACOS_DIR/Eos OBS Bridge"
+            chmod +x "$MACOS_DIR/Eos OBS Bridge"
+
+            # Server binary and overlay assets in Resources
+            cp "release/eos-obs-bridge-macos-${ARCH}" "$RES_DIR/eos-obs-bridge"
+            chmod +x "$RES_DIR/eos-obs-bridge"
+            cp overlay.html styles.css config.example.json "$RES_DIR/"
+
+            # ── Sign bundle ──────────────────────────────────────────────────
+            # Sign the Node.js binary first (needs JIT entitlements for V8)
+            codesign \
+              --sign "$DEVELOPER_ID" \
+              --options runtime \
+              --entitlements entitlements.plist \
+              --timestamp \
+              --force \
+              "$RES_DIR/eos-obs-bridge"
+
+            # Sign the Swift binary (standard hardened runtime, no JIT needed)
+            codesign \
+              --sign "$DEVELOPER_ID" \
+              --options runtime \
+              --timestamp \
+              --force \
+              "$MACOS_DIR/Eos OBS Bridge"
+
+            # Sign the bundle as a whole
             codesign \
               --sign "$DEVELOPER_ID" \
               --options runtime \
@@ -70,20 +129,11 @@ jobs:
               --timestamp \
               --force \
               --verbose \
-              "release/eos-obs-bridge-macos-${ARCH}"
-          done
+              "$APP"
 
-      # ── Notarization ────────────────────────────────────────────────────────
-
-      - name: Notarize binaries
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          for ARCH in arm64 x64; do
-            echo "Notarizing macos-${ARCH}..."
-            zip -j "notarize-${ARCH}.zip" "release/eos-obs-bridge-macos-${ARCH}"
+            # ── Notarize bundle ──────────────────────────────────────────────
+            echo "Notarizing .app for ${ARCH}..."
+            ditto -c -k --keepParent "$APP" "notarize-${ARCH}.zip"
             xcrun notarytool submit "notarize-${ARCH}.zip" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_ID_PASSWORD" \
@@ -91,57 +141,44 @@ jobs:
               --wait \
               --verbose
             rm "notarize-${ARCH}.zip"
-          done
 
-      # ── Build .pkg installers ────────────────────────────────────────────────
+            # Staple notarization ticket to the .app
+            xcrun stapler staple "$APP"
 
-      - name: Build pkg installers
-        env:
-          INSTALLER_ID: ${{ secrets.APPLE_INSTALLER_ID }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          for ARCH in arm64 x64; do
+            # ── Build .pkg installer ─────────────────────────────────────────
             PKG_ROOT="/tmp/pkg-root-${ARCH}"
-            INSTALL_DIR="$PKG_ROOT/Applications/Eos OBS Bridge"
-            mkdir -p "$INSTALL_DIR"
+            mkdir -p "$PKG_ROOT/Applications"
+            cp -R "$APP" "$PKG_ROOT/Applications/"
 
-            cp "release/eos-obs-bridge-macos-${ARCH}" "$INSTALL_DIR/Eos OBS Bridge"
-            chmod +x "$INSTALL_DIR/Eos OBS Bridge"
-            cp overlay.html styles.css config.example.json "$INSTALL_DIR/"
-
-            # Build unsigned package
             pkgbuild \
               --root "$PKG_ROOT" \
               --identifier "uk.tomdavislx.eos-obs-bridge" \
-              --version "${VERSION#v}" \
+              --version "$VERSION_NUM" \
               --install-location "/" \
-              "release/eos-obs-bridge-${VERSION}-macos-${ARCH}-unsigned.pkg"
+              "release/Eos-OBS-Bridge-${VERSION}-macos-${ARCH}-unsigned.pkg"
 
-            # Sign with Developer ID Installer certificate
             productsign \
               --sign "$INSTALLER_ID" \
-              "release/eos-obs-bridge-${VERSION}-macos-${ARCH}-unsigned.pkg" \
-              "release/eos-obs-bridge-${VERSION}-macos-${ARCH}.pkg"
+              "release/Eos-OBS-Bridge-${VERSION}-macos-${ARCH}-unsigned.pkg" \
+              "release/Eos-OBS-Bridge-${VERSION}-macos-${ARCH}.pkg"
 
-            rm "release/eos-obs-bridge-${VERSION}-macos-${ARCH}-unsigned.pkg"
+            rm "release/Eos-OBS-Bridge-${VERSION}-macos-${ARCH}-unsigned.pkg"
 
-            # Notarize the pkg
-            xcrun notarytool submit "release/eos-obs-bridge-${VERSION}-macos-${ARCH}.pkg" \
+            # Notarize and staple the .pkg
+            xcrun notarytool submit "release/Eos-OBS-Bridge-${VERSION}-macos-${ARCH}.pkg" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_ID_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
               --wait \
               --verbose
+            xcrun stapler staple "release/Eos-OBS-Bridge-${VERSION}-macos-${ARCH}.pkg"
 
-            # Staple notarization ticket to pkg (possible for .pkg unlike raw binaries)
-            xcrun stapler staple "release/eos-obs-bridge-${VERSION}-macos-${ARCH}.pkg"
+            # Clean up .app for next iteration
+            rm -rf "$APP"
           done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/eos-obs-bridge-*.pkg
+          files: release/Eos-OBS-Bridge-*.pkg
           generate_release_notes: true

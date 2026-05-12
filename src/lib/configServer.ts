@@ -13,13 +13,15 @@
 
 import * as http from 'http';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { EventEmitter } from 'events';
 import { Config, loadConfig } from '../config';
 
-// When packaged, config.json lives alongside the executable in the app folder.
+// When packaged as a .app, config lives in ~/Library/Application Support/
+// so it remains writable without admin privileges.
 const CONFIG_PATH = (process as any).pkg
-  ? path.join(path.dirname(process.execPath), 'config.json')
+  ? path.join(os.homedir(), 'Library', 'Application Support', 'Eos OBS Bridge', 'config.json')
   : path.join(process.cwd(), 'config.json');
 
 export class ConfigServer extends EventEmitter {

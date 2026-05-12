@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Eos OBS Bridge</string>
+    <key>CFBundleDisplayName</key>
+    <string>Eos OBS Bridge</string>
+    <key>CFBundleIdentifier</key>
+    <string>uk.tomdavislx.eos-obs-bridge</string>
+    <key>CFBundleVersion</key>
+    <string>VERSION_PLACEHOLDER</string>
+    <key>CFBundleShortVersionString</key>
+    <string>VERSION_PLACEHOLDER</string>
+    <key>CFBundleExecutable</key>
+    <string>Eos OBS Bridge</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <!-- Background-only app: no Dock icon, no menu bar -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
