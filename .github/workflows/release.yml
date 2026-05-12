@@ -34,20 +34,29 @@ jobs:
 
       # ── Code signing ────────────────────────────────────────────────────────
 
-      - name: Import signing certificate
+      - name: Import signing certificates
         env:
           CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          INSTALLER_P12: ${{ secrets.APPLE_INSTALLER_CERTIFICATE }}
+          INSTALLER_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
         run: |
-          echo "$CERTIFICATE_P12" | base64 --decode > certificate.p12
           security create-keychain -p ci-keychain-password build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p ci-keychain-password build.keychain
-          security import certificate.p12 -k build.keychain \
+
+          echo "$CERTIFICATE_P12" | base64 --decode > app-cert.p12
+          security import app-cert.p12 -k build.keychain \
             -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm app-cert.p12
+
+          echo "$INSTALLER_P12" | base64 --decode > installer-cert.p12
+          security import installer-cert.p12 -k build.keychain \
+            -P "$INSTALLER_PASSWORD" -T /usr/bin/pkgbuild -T /usr/bin/productsign
+          rm installer-cert.p12
+
           security set-key-partition-list \
             -S apple-tool:,apple: -s -k ci-keychain-password build.keychain
-          rm certificate.p12
 
       - name: Sign binaries
         env:
@@ -84,29 +93,55 @@ jobs:
             rm "notarize-${ARCH}.zip"
           done
 
-      # ── Package release archives ─────────────────────────────────────────────
+      # ── Build .pkg installers ────────────────────────────────────────────────
 
-      - name: Create release archives
+      - name: Build pkg installers
+        env:
+          INSTALLER_ID: ${{ secrets.APPLE_INSTALLER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ github.ref_name }}
         run: |
-          VERSION="${{ github.ref_name }}"
-
           for ARCH in arm64 x64; do
-            STAGING="/tmp/eos-obs-bridge-macos-${ARCH}"
-            mkdir -p "$STAGING"
+            PKG_ROOT="/tmp/pkg-root-${ARCH}"
+            INSTALL_DIR="$PKG_ROOT/usr/local/eos-obs-bridge"
+            mkdir -p "$INSTALL_DIR"
 
-            cp "release/eos-obs-bridge-macos-${ARCH}" "$STAGING/eos-obs-bridge"
-            chmod +x "$STAGING/eos-obs-bridge"
+            cp "release/eos-obs-bridge-macos-${ARCH}" "$INSTALL_DIR/eos-obs-bridge"
+            chmod +x "$INSTALL_DIR/eos-obs-bridge"
+            cp overlay.html styles.css config.example.json "$INSTALL_DIR/"
 
-            cp overlay.html styles.css "$STAGING/"
-            cp config.example.json "$STAGING/config.json"
+            # Build unsigned package
+            pkgbuild \
+              --root "$PKG_ROOT" \
+              --identifier "uk.tomdavislx.eos-obs-bridge" \
+              --version "${VERSION#v}" \
+              --install-location "/" \
+              "release/eos-obs-bridge-${VERSION}-macos-${ARCH}-unsigned.pkg"
 
-            cd "$STAGING"
-            zip -r "$GITHUB_WORKSPACE/eos-obs-bridge-${VERSION}-macos-${ARCH}.zip" .
-            cd "$GITHUB_WORKSPACE"
+            # Sign with Developer ID Installer certificate
+            productsign \
+              --sign "$INSTALLER_ID" \
+              "release/eos-obs-bridge-${VERSION}-macos-${ARCH}-unsigned.pkg" \
+              "release/eos-obs-bridge-${VERSION}-macos-${ARCH}.pkg"
+
+            rm "release/eos-obs-bridge-${VERSION}-macos-${ARCH}-unsigned.pkg"
+
+            # Notarize the pkg
+            xcrun notarytool submit "release/eos-obs-bridge-${VERSION}-macos-${ARCH}.pkg" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_ID_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait \
+              --verbose
+
+            # Staple notarization ticket to pkg (possible for .pkg unlike raw binaries)
+            xcrun stapler staple "release/eos-obs-bridge-${VERSION}-macos-${ARCH}.pkg"
           done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: eos-obs-bridge-*.zip
+          files: release/eos-obs-bridge-*.pkg
           generate_release_notes: true

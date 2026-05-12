@@ -69,7 +69,10 @@ async function restartBridge(): Promise<void> {
 
   try {
     if (app && app.isRunning()) {
-      app.stop();
+      await new Promise<void>(resolve => {
+        app!.once('stopped', resolve);
+        app!.stop();
+      });
       app = null;
     }
 
