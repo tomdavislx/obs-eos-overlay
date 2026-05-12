@@ -57,6 +57,7 @@ jobs:
             codesign \
               --sign "$DEVELOPER_ID" \
               --options runtime \
+              --entitlements entitlements.plist \
               --timestamp \
               --force \
               --verbose \
