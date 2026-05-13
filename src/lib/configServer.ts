@@ -3,7 +3,7 @@
  *
  * Routes:
  *   GET  /            → config UI HTML page
- *   GET  /api/config  → current effective config (JSON)
+ *   GET  /api/config  → effective config from config.json + env (via loadConfig)
  *   POST /api/config  → validate + save config.json, then emit 'restart'
  *   GET  /api/status  → bridge running status
  *
@@ -13,21 +13,16 @@
 
 import * as http from 'http';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { Config, loadConfig } from '../config';
-
-// When packaged as a .app, config lives in ~/Library/Application Support/
-// so it remains writable without admin privileges.
-const CONFIG_PATH = (process as any).pkg
-  ? path.join(os.homedir(), 'Library', 'Application Support', 'Eos OBS Bridge', 'config.json')
-  : path.join(process.cwd(), 'config.json');
+import { Config, loadConfig, getConfigPath } from '../config';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const APP_VERSION: string = require('../../package.json').version;
 
 export class ConfigServer extends EventEmitter {
+  private static readonly MAX_CONFIG_BODY_BYTES = 512 * 1024;
+
   private server: http.Server | null = null;
   private readonly port: number;
   private readonly getStatus: () => any;
@@ -123,41 +118,72 @@ export class ConfigServer extends EventEmitter {
 
   private handleSaveConfig(req: http.IncomingMessage, res: http.ServerResponse): void {
     let body = '';
-    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+    let size = 0;
+    let responded = false;
+
+    const fail = (code: number, message: string): void => {
+      if (responded) {
+        return;
+      }
+      responded = true;
+      if (!res.headersSent) {
+        res.writeHead(code, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: message }));
+      }
+    };
+
+    req.on('error', (err: Error) => {
+      console.warn('[ConfigServer] Config POST request error:', err.message);
+      fail(400, 'Request aborted');
+    });
+
+    req.on('data', (chunk: Buffer) => {
+      if (responded) {
+        return;
+      }
+      size += chunk.length;
+      if (size > ConfigServer.MAX_CONFIG_BODY_BYTES) {
+        fail(413, 'Request body too large');
+        req.destroy();
+        return;
+      }
+      body += chunk.toString();
+    });
+
     req.on('end', () => {
+      if (responded) {
+        return;
+      }
+      const configPath = getConfigPath();
       try {
         const parsed = JSON.parse(body);
         const clean = this.stripCommentKeys(parsed);
 
-        // Snapshot existing file so we can roll back on validation failure
-        const previousContent = fs.existsSync(CONFIG_PATH)
-          ? fs.readFileSync(CONFIG_PATH, 'utf-8')
+        const previousContent = fs.existsSync(configPath)
+          ? fs.readFileSync(configPath, 'utf-8')
           : null;
 
-        // Write tentatively then validate via loadConfig
-        fs.writeFileSync(CONFIG_PATH, JSON.stringify(clean, null, 2), 'utf-8');
+        fs.mkdirSync(path.dirname(configPath), { recursive: true });
+        fs.writeFileSync(configPath, JSON.stringify(clean, null, 2), 'utf-8');
 
         try {
-          loadConfig(); // throws on validation failure
+          loadConfig();
         } catch (validationErr: any) {
-          // Restore previous file
           if (previousContent !== null) {
-            fs.writeFileSync(CONFIG_PATH, previousContent, 'utf-8');
+            fs.writeFileSync(configPath, previousContent, 'utf-8');
           } else {
-            fs.unlinkSync(CONFIG_PATH);
+            fs.unlinkSync(configPath);
           }
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: validationErr.message }));
+          fail(400, validationErr.message);
           return;
         }
 
+        responded = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, message: 'Saved. Restarting bridge...' }));
         setTimeout(() => this.emit('restart'), 150);
-
       } catch (err: any) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
+        fail(400, err.message);
       }
     });
   }
@@ -651,7 +677,9 @@ function collectForm() {
       var parts = el.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
       set(cfg, id, parts);
     } else if (numFields.has(id)) {
-      var n = parseFloat(el.value);
+      var rawNum = el.value.trim();
+      if (rawNum === '') return;
+      var n = parseFloat(rawNum);
       set(cfg, id, isNaN(n) ? 0 : n);
     } else {
       set(cfg, id, el.value);
@@ -738,27 +766,29 @@ document.getElementById('save-btn').addEventListener('click', function() {
 
 function pollRestart(since) {
   setTimeout(function() {
+    var btn = document.getElementById('save-btn');
+    var elapsed = Date.now() - since;
+    if (elapsed > 15000) {
+      showToast('Bridge did not report running within 15s. Check the process terminal output.', 'err', 8000);
+      btn.disabled = false;
+      btn.textContent = 'Apply';
+      return;
+    }
     fetch('/api/status')
       .then(function(r){ return r.json(); })
       .then(function(s) {
         applyStatus(s);
         if (s.running) {
           showToast('Bridge restarted successfully', 'ok', 3000);
-          var btn = document.getElementById('save-btn');
           btn.disabled = false;
           btn.textContent = 'Apply';
           loadConfig();
-        } else if (Date.now() - since > 15000) {
-          showToast('Bridge taking longer than expected to start', 'err', 6000);
-          var btn2 = document.getElementById('save-btn');
-          btn2.disabled = false;
-          btn2.textContent = 'Save & Restart';
         } else {
           pollRestart(since);
         }
       })
       .catch(function() {
-        if (Date.now() - since < 15000) pollRestart(since);
+        pollRestart(since);
       });
   }, 600);
 }

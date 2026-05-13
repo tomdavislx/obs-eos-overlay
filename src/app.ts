@@ -107,7 +107,7 @@ export class EosOverlayBridge extends EventEmitter {
   /**
    * Stop the application
    */
-  stop(): void {
+  async stop(): Promise<void> {
     if (!this.running) {
       return;
     }
@@ -126,7 +126,7 @@ export class EosOverlayBridge extends EventEmitter {
       this.obsControlClient = null;
     }
     this.cueManager.cleanup();
-    this.overlayServer.stop();
+    await this.overlayServer.stop();
 
     this.running = false;
 

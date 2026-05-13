@@ -115,9 +115,10 @@ export class OverlayServer extends EventEmitter {
   }
 
   /**
-   * Stop HTTP + WebSocket server
+   * Stop HTTP + WebSocket server and release the listen port.
+   * Resolves when the TCP port is closed (required before restarting on the same port).
    */
-  stop(): void {
+  stop(): Promise<void> {
     if (this.pingTimer) {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
@@ -137,28 +138,41 @@ export class OverlayServer extends EventEmitter {
     this.wss = null;
     this.httpServer = null;
 
-    if (wss) {
-      wss.close((err) => {
-        if (err) {
-          console.error('[OverlayServer] WebSocketServer.close:', err);
-        }
-        if (httpServer) {
-          httpServer.close(() => {
-            console.log('[OverlayServer] HTTP/WebSocket server stopped');
-            this.emit('stopped');
-          });
-        } else {
-          this.emit('stopped');
-        }
-      });
-    } else if (httpServer) {
-      httpServer.close(() => {
-        console.log('[OverlayServer] HTTP server stopped');
+    return new Promise((resolve) => {
+      const finish = (): void => {
         this.emit('stopped');
-      });
-    } else {
-      this.emit('stopped');
-    }
+        resolve();
+      };
+
+      if (wss) {
+        wss.close((err) => {
+          if (err) {
+            console.error('[OverlayServer] WebSocketServer.close:', err);
+          }
+          if (httpServer) {
+            httpServer.close((closeErr) => {
+              if (closeErr) {
+                console.error('[OverlayServer] httpServer.close:', closeErr);
+              }
+              console.log('[OverlayServer] HTTP/WebSocket server stopped');
+              finish();
+            });
+          } else {
+            finish();
+          }
+        });
+      } else if (httpServer) {
+        httpServer.close((closeErr) => {
+          if (closeErr) {
+            console.error('[OverlayServer] httpServer.close:', closeErr);
+          }
+          console.log('[OverlayServer] HTTP server stopped');
+          finish();
+        });
+      } else {
+        finish();
+      }
+    });
   }
 
   /**
@@ -234,7 +248,7 @@ export class OverlayServer extends EventEmitter {
    * Cleanup resources
    */
   cleanup(): void {
-    this.stop();
+    void this.stop();
     this.removeAllListeners();
   }
 

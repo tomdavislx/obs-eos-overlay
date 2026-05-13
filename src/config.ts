@@ -15,11 +15,23 @@ import {
   parseCommaSeparatedCueNumbers,
 } from './lib/obsRecordingTriggers';
 
-function getConfigPath(): string {
-  if ((process as any).pkg) {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'Eos OBS Bridge', 'config.json');
+/**
+ * Path to config.json (development: cwd; packaged: per-OS writable app data dir).
+ */
+export function getConfigPath(): string {
+  if (!(process as any).pkg) {
+    return path.join(process.cwd(), 'config.json');
   }
-  return path.join(process.cwd(), 'config.json');
+  const home = os.homedir();
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'Eos OBS Bridge', 'config.json');
+  }
+  if (process.platform === 'win32') {
+    const base = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    return path.join(base, 'Eos OBS Bridge', 'config.json');
+  }
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(home, '.config');
+  return path.join(xdg, 'eos-obs-bridge', 'config.json');
 }
 const CONFIG_FILE_PATH = getConfigPath();
 
@@ -415,6 +427,15 @@ function validateConfig(config: Config): void {
 
   if (config.websocket.port < 1 || config.websocket.port > 65535) {
     errors.push(`WEBSOCKET_PORT must be between 1 and 65535 (got ${config.websocket.port})`);
+  }
+
+  if (
+    config.configUI.enabled &&
+    config.configUI.port === config.websocket.port
+  ) {
+    errors.push(
+      `Overlay WebSocket port and Config UI port must differ (both run in this process; both were ${config.websocket.port})`
+    );
   }
 
   // Validate timeouts
